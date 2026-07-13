@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "prospector"
 version = "0.1.0"
 description = "Researches home-service companies on the open web and drafts personalized outreach into an Obsidian vault. Never sends, never touches Facebook."
+license = {file = "LICENSE"}
 requires-python = ">=3.11"
 dependencies = [
     "typer>=0.12",

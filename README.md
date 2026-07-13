@@ -223,4 +223,4 @@ Dataview, everything still works as plain markdown.
 
 ## License
 
-No license yet — all rights reserved. Open an issue if you want to use it.
+[MIT](LICENSE)
