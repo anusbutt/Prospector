@@ -208,3 +208,10 @@ Wait for consent; never auto-create ADRs. Group related decisions (stacks, authe
 
 ## Code Standards
 See `.specify/memory/constitution.md` for code quality, testing, performance, security, and architecture principles.
+
+## Active Technologies
+- Python 3.11+ + Typer (CLI), httpx (HTTP), selectolax (HTML parsing), (001-prospector-cli)
+- Filesystem only — the Obsidian vault is the datastore (notes keyed by (001-prospector-cli)
+
+## Recent Changes
+- 001-prospector-cli: Added Python 3.11+ + Typer (CLI), httpx (HTTP), selectolax (HTML parsing),
