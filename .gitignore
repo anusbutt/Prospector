@@ -9,4 +9,4 @@ build/
 dist/
 history/
 tests/
-samples/*.local.csv
+samples/*.local.*

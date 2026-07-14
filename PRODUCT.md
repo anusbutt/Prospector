@@ -12,6 +12,8 @@ Target lift: move a batch from ~2/20 named to ~10/20 named, auto-dedupe, and cha
 
 A **CLI batch tool** that takes a list of companies and, per company: finds the owner's first name (open web only), grabs one personalization hook, detects channel (email vs Messenger-only) and catches duplicate inboxes, scores name confidence, drafts a paste-ready message in the owner's locked voice, and writes one Obsidian note per company plus a dashboard note. The human reviews the vault, fixes low-confidence rows, and sends manually.
 
+An optional **`source` stage** (§10) builds that input list in the first place: it discovers companies via Google Places across US metros and filters to those showing Meta-ad infrastructure on their own site.
+
 ## 3. Non-goals (do not build)
 
 - **No email sender.** Sending is manual, by the human, from their real inbox. A DIY sender saves nothing and risks domain reputation.
@@ -22,7 +24,7 @@ A **CLI batch tool** that takes a list of companies and, per company: finds the 
 
 ## 4. Flow (conceptual — spec-kit turns this into tasks)
 
-`ingest → dedupe/bucket → resolve → scrape/extract → enrich → score → draft → write vault → (human review)`
+`source (optional, §10) → ingest → dedupe/bucket → resolve → scrape/extract → enrich → score → draft → write vault → (human review)`
 
 - **Ingest + dedupe** — load list (CSV / markdown table), normalize, detect duplicate emails/domains (two businesses sharing one inbox → one send), split `emailable` vs `messenger-only`.
 - **Resolve** — find each company's website + Google Business listing when a URL isn't given.
@@ -99,15 +101,16 @@ Holds **Dataview** queries (community plugin — note in README; plain notes sti
 
 We can't verify ads, but we can cheaply gauge whether Facebook is even a channel they use — all from the open web, never from inside FB:
 
-- **strong** → two or more of: website prominently links to / embeds their Facebook page; site has a Messenger/FB chat widget; Google/search results show an active FB page (recent posts or reviews); `facebook_url` given as input and the page resolves as active in search. → Draft the **Facebook variant** (mentions the page directly).
-- **weak** → one soft signal, or a stale/low-activity FB presence. → Draft the **channel-agnostic variant**; mention Facebook only as one example ("on Facebook or wherever your leads come in").
-- **none** → no findable FB usage signal. → Draft the **channel-agnostic variant**; don't mention Facebook at all. Lead with lead-response value.
+- **strong** → two or more of: website prominently links to / embeds their Facebook page; site has a Messenger/FB chat widget; Google/search results show an active FB page (recent posts or reviews); `facebook_url` given as input and the page resolves as active in search. → Draft the **Facebook variant** (references their page activity directly: "when someone messages your page").
+- **weak** / **none** → one soft signal or nothing findable. → Draft the **channel-agnostic variant**: Facebook appears only as a fact about the product ("Nestaro lives in your Facebook page inbox"), with no assertion about their page usage or activity.
 
-Honesty rule mirrors §7: when unsure, **default down** (`weak`/`none`), never up. Better to under-claim the channel than pitch a Facebook assistant to someone who doesn't use Facebook.
+Honesty rule mirrors §7: when unsure, **default down** (`weak`/`none`), never up. *(Amended 2026-07-14, constitution v2.0.0: the product is Nestaro, a Facebook-Messenger agent — it cannot be described without naming Facebook. The signal now gates claims about the prospect's usage, not product-fact mentions. Ad-running is still never claimed at any level.)*
 
 ## 8. Locked message templates
 
 Model fills bracketed slots only. Voice: short, human, practitioner. No hashtags. No AI-sounding language. No em-dash pile-ups.
+
+The offer *(updated 2026-07-14)*: **Nestaro** (`lead_qualifier_feature.md`) — free 10-day run for 5 duct-cleaning companies, set up entirely by Anas.
 
 **Variant selection:** `fb_signal: strong` → Facebook variant. `weak` / `none` → channel-agnostic variant. Messenger bucket → Messenger DM.
 
@@ -119,13 +122,11 @@ Hi [Name or "[Company] team"],
 
 [If info@ inbox: "Straight to it, and if this isn't your department, please forward it to whoever handles your bookings."  Else: "Straight to it."]
 
-I'll set up an AI assistant on your Facebook page for free, and you keep every job it books. No contract, no cost.
+I'm giving 5 duct cleaning companies a free 10-day run of Nestaro, an AI assistant that answers your Facebook page messages for you. I set everything up; it costs you nothing for the ten days.
 
-Here's what it does. The moment a lead messages or fills out a form, it replies day or night, figures out whether they're a real customer [hook: "in your service area" / "around [city]"], and hands the good ones straight to you. The junk never touches your phone.
+Here's what it does. When someone messages your page, it replies in seconds, day or night, in a normal human voice. It checks they're [hook: "in your service area" / "around [city]"], quotes your real prices (it never invents a number), and books them into a genuinely open slot on your calendar. You get the finished lead by email: name, phone, address, service, and time. Anything it shouldn't answer gets flagged to you instead of guessed.
 
-I'm doing this with a small group of duct cleaning companies to build real case studies. That's the whole catch: it works for you, and if it does, I get to point to the results. If it doesn't, you've lost nothing.
-
-Open to it? Reply here and I'll have you running this week.
+Five spots, first come. Reply here and I'll have yours running this week.
 
 Anas
 x.com/iamanusbutt
@@ -133,31 +134,14 @@ linkedin.com/in/anus-yousuf
 ```
 
 ### Email — channel-agnostic variant (`fb_signal: weak` / `none`)
-Same offer, but the pitch rests on lead response, not on Facebook.
+Identical except the second paragraph opens as product-fact, asserting nothing about their page activity.
 ```
-Subject: free setup for [Company], you keep the bookings
-
-Hi [Name or "[Company] team"],
-
-[If info@ inbox: "Straight to it, and if this isn't your department, please forward it to whoever handles your bookings."  Else: "Straight to it."]
-
-I'll set up an AI assistant that answers your new leads for free, and you keep every job it books. No contract, no cost.
-
-Here's what it does. However a lead reaches you — a form, a message[, or Facebook if you use it] — it replies in seconds, day or night, figures out whether they're a real customer [hook: "in your service area" / "around [city]"], and hands the good ones straight to you. The junk never touches your phone.
-
-I'm doing this with a small group of duct cleaning companies to build real case studies. That's the whole catch: it works for you, and if it does, I get to point to the results. If it doesn't, you've lost nothing.
-
-Open to it? Reply here and I'll have you running this week.
-
-Anas
-x.com/iamanusbutt
-linkedin.com/in/anus-yousuf
+Here's what it does. Nestaro lives in your Facebook page inbox: when a customer messages, it replies in seconds, day or night, in a normal human voice. It checks they're [hook], quotes your real prices (it never invents a number), and books them into a genuinely open slot on your calendar. You get the finished lead by email: name, phone, address, service, and time. Anything it shouldn't answer gets flagged to you instead of guessed.
 ```
-(`fb_signal: none` → drop the "or Facebook if you use it" clause entirely.)
 
 ### Messenger DM (messenger bucket)
 ```
-Hey! I build AI assistants for duct cleaning companies. This one answers every new lead on your page in seconds, filters out the time-wasters, and flags the ready-to-book ones for you[, around [city]]. I'm setting it up free for a few companies right now to build case studies. Want me to run yours? (My work: x.com/iamanusbutt)
+Hey! I'm giving 5 duct cleaning companies a free 10-day run of Nestaro, an AI assistant that answers your page messages in seconds, day or night. It checks customers are real[, around [city]], quotes your real prices, and books them into open slots on your calendar. You just get the finished lead. I set it all up for you. Want one of the 5 spots? (My work: x.com/iamanusbutt)
 ```
 
 ## 9. Success criteria
@@ -168,3 +152,22 @@ Hey! I build AI assistants for duct cleaning companies. This one answers every n
 - The Facebook pitch is only used when open-web signals support it; otherwise the draft is channel-agnostic. Ad-running is never claimed or assumed.
 - Re-running is safe (idempotent, non-destructive).
 - Build stayed in scope: no sender, no FB scraping, no web UI.
+- Sourcing (§10): from a keyword + metro list, produces a deduped candidate CSV filtered to pixel-positive companies, in the §6 input format, without ever contacting a Facebook host — and `ad_signal` never appears as a claim in any draft.
+
+## 10. Company sourcing (`prospector source`)
+
+**Why:** the outreach in §8 offers free setup of the **Lead Qualifier agent** — an assistant that answers incoming leads instantly, qualifies them, books the good ones into a dashboard, and notifies the owner. Its best first users are duct-cleaning companies already paying for Meta ads (they have lead flow worth qualifying). §§1–9 assume a list already exists; this stage builds that list.
+
+**What it does:**
+
+- **Discover** — Google Places Text Search (New) for a service keyword (default: `duct cleaning`) across a configurable set of US metro areas. Ships with a bundled default list of ~30 major US metros for nationwide coverage; the metro list is config, not code.
+- **Dedupe** — by Places `place_id` and by website domain across metros (franchises/multi-listing businesses collapse to one row).
+- **Ad signal (`ad_signal: pixel | none`)** — for each candidate with a website, fetch the homepage politely (same fetch stack and rules as §4; the Facebook-host block is fully in force) and detect the **Meta Pixel** in the page source: `connect.facebook.net/*/fbevents.js`, `fbq('init'…)` calls, or the `facebook.com/tr` noscript image *URL appearing as text in their HTML* (string inspection only — never fetched). When the page instead references a **Google Tag Manager container**, fetch that container's public JS once (`googletagmanager.com` — not a Facebook host) and inspect *it* the same way — live validation (2026-07-14) showed most modern pixel installs are GTM-mediated and invisible in page HTML. Pixel present = the business has Meta-ads tracking infrastructure installed on its own site.
+- **Contact email extraction** — capture a publicly listed email (mailto: links or plain-text on the fetched pages) when present. Absent → email stays blank → messenger bucket downstream, as usual (§6).
+- **Output** — a CSV in the §6 input format (`company, email, website, city` + `ad_signal` extra column, which `run` ignores with its normal unknown-column warning). Default output keeps only `ad_signal: pixel` rows; `--all` keeps everything.
+
+**Honesty rule (extends §7.5):** `ad_signal` is a **targeting filter only** — it decides who gets *on the list*. A pixel can be dormant, inherited from an old agency, or misconfigured, so pixel-presence is NEVER used to claim or imply ad-running in a draft. §7.5's `fb_signal` rules and template selection are unchanged.
+
+**Requirements & limits:** `GOOGLE_PLACES_API_KEY` is required for `source` (pre-flight error if absent — there is no search-engine fallback for bulk discovery). Each run reports its Places query count; runs are bounded so a nationwide sweep stays inside the Places free tier.
+
+**Non-goals:** no paid lead databases, no directory scraping (Yelp/Angi/etc.), no Facebook Ad Library access (login-walled, and Principle II forbids it).
