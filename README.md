@@ -24,7 +24,7 @@ These are hard constraints enforced in code and tests, not aspirations
 | 1 | **Never sends anything** | There is no send code path, no SMTP/API dependency, and no `send` command. Output is drafts in markdown. |
 | 2 | **Never touches Facebook** | Every outbound request passes through one HTTP choke point that raises on `facebook.com`, `fb.com`, `fb.me`, `fbcdn.net`, and `messenger.com` before any network activity. A `facebook_url` input is stored as a signal and never fetched. |
 | 3 | **Never fabricates a name** | A real first name appears in a draft only at high confidence, and only when it traces to a recorded source (a page URL and excerpt). A validator rejects any unsourced name, even if the LLM produces one. |
-| 4 | **Never claims what it can't observe** | Ad-running is never claimed or implied. Facebook is mentioned only when observed open-web signals support it; uncertain signals always rank *down*. |
+| 4 | **Never claims what it can't observe** | Ad-running is never claimed or implied. Statements about the *prospect's own* Facebook activity appear only when observed open-web signals support them (uncertain signals always rank *down*); describing the offered product's Facebook capability is a product fact, not a claim about the prospect. |
 | 5 | **No web UI** | The Obsidian vault *is* the interface. |
 
 ## How it works
@@ -108,10 +108,39 @@ cp .env.example .env   # then add your keys
 |----------|----------|----------------------|
 | `OPENROUTER_API_KEY` | For drafting | Pre-flight error (or run with `--no-llm`) |
 | `OPENROUTER_MODEL` | No | Defaults to `anthropic/claude-sonnet-4.5` |
-| `GOOGLE_PLACES_API_KEY` | No | Website/city resolution falls back to DuckDuckGo only |
+| `GOOGLE_PLACES_API_KEY` | For `source` | `source` exits pre-flight (no fallback discovery); `run`'s website/city resolution falls back to DuckDuckGo only |
 | `HUNTER_API_KEY` | No | Email-name enrichment skipped (capped at medium confidence when present) |
 
 Secrets live in `.env` (gitignored). Nothing is ever logged or committed.
+
+## Sourcing (optional): build the list itself
+
+`prospector source` discovers companies before any of the above runs — for when
+you don't have a list yet:
+
+```bash
+prospector source                                  # 30 major US metros -> candidates.csv
+prospector source --limit 2 --all --verbose        # small smoke test, keep everything
+prospector source --keyword "air duct cleaning" --metros my_metros.txt
+prospector run candidates.csv                      # output feeds run unchanged
+```
+
+Per metro it queries Google Places Text Search once (budgeted — `--max-queries`,
+default 60, usage reported), dedupes across metros by place id and website
+domain, then fetches each candidate's **own homepage** (same polite fetcher,
+same Facebook-host block) and inspects the HTML source for **Meta Pixel**
+tracking markup — including inside any referenced Google Tag Manager
+container's public configuration, where most modern installs live. Companies whose sites carry the pixel — businesses already
+investing in Meta ads — are written to the CSV (`ad_signal: pixel`); pass
+`--all` to keep every discovered company. A publicly listed contact email is
+captured when one exists (never inferred); rows without one route to the
+Messenger bucket downstream.
+
+Two honesty notes, enforced in code: pixel detection is string inspection of
+already-fetched pages — **no Facebook host is ever contacted** — and
+`ad_signal` is a targeting filter only. It is ignored by `run` and can never
+appear as an ad-running claim in a draft (a pixel can be dormant; guarantee #4
+stands).
 
 ## Input format
 

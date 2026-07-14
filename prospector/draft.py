@@ -12,7 +12,7 @@ import re
 import httpx
 
 from prospector.config import Settings
-from prospector.models import Draft, FbSignal, Prospect, Variant
+from prospector.models import Draft, Prospect, Variant
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -31,63 +31,77 @@ OPENER_DIRECT = "Straight to it."
 
 SUBJECT_TEMPLATE = "free setup for {subject_company}, you keep the bookings"
 
-# fb_signal weak -> conditional clause; none -> empty (FR-014)
-WEAK_FB_CLAUSE = ", or Facebook if you use it"
+# Offer (PRODUCT.md §8, updated 2026-07-14): Nestaro, free 10-day run for
+# 5 duct-cleaning companies, set up entirely by Anas. The agnostic variant
+# differs from the FB variant only in how paragraph two opens: product-fact
+# ("Nestaro lives in your Facebook page inbox") vs their-activity ("When
+# someone messages your page") — constitution v2.0.0 Principle V.
+EMAIL_OFFER_PARAGRAPH = (
+    "I'm giving 5 duct cleaning companies a free 10-day run of Nestaro, "
+    "an AI assistant that answers your Facebook page messages for you. "
+    "I set everything up; it costs you nothing for the ten days."
+)
 
-EMAIL_AGNOSTIC_TEMPLATE = """Hi {greeting},
+EMAIL_BODY_TAIL = """quotes your real prices (it never invents a number), and books them into a genuinely open slot on your calendar. You get the finished lead by email: name, phone, address, service, and time. Anything it shouldn't answer gets flagged to you instead of guessed.
+
+Five spots, first come. Reply here and I'll have yours running this week.
+
+{signature}"""
+
+EMAIL_FB_TEMPLATE = (
+    """Hi {greeting},
 
 {opener}
 
-I'll set up an AI assistant that answers your new leads for free, and you keep every job it books. No contract, no cost.
+"""
+    + EMAIL_OFFER_PARAGRAPH
+    + """
 
-Here's what it does. However a lead reaches you — a form, a message{channel_clause} — it replies in seconds, day or night, figures out whether they're a real customer {hook_phrase}, and hands the good ones straight to you. The junk never touches your phone.
+Here's what it does. When someone messages your page, it replies in seconds, day or night, in a normal human voice. It checks they're {hook_phrase}, """
+    + EMAIL_BODY_TAIL
+)
 
-I'm doing this with a small group of duct cleaning companies to build real case studies. That's the whole catch: it works for you, and if it does, I get to point to the results. If it doesn't, you've lost nothing.
-
-Open to it? Reply here and I'll have you running this week.
-
-{signature}"""
-
-EMAIL_FB_TEMPLATE = """Hi {greeting},
+EMAIL_AGNOSTIC_TEMPLATE = (
+    """Hi {greeting},
 
 {opener}
 
-I'll set up an AI assistant on your Facebook page for free, and you keep every job it books. No contract, no cost.
+"""
+    + EMAIL_OFFER_PARAGRAPH
+    + """
 
-Here's what it does. The moment a lead messages or fills out a form, it replies day or night, figures out whether they're a real customer {hook_phrase}, and hands the good ones straight to you. The junk never touches your phone.
-
-I'm doing this with a small group of duct cleaning companies to build real case studies. That's the whole catch: it works for you, and if it does, I get to point to the results. If it doesn't, you've lost nothing.
-
-Open to it? Reply here and I'll have you running this week.
-
-{signature}"""
+Here's what it does. Nestaro lives in your Facebook page inbox: when a customer messages, it replies in seconds, day or night, in a normal human voice. It checks they're {hook_phrase}, """
+    + EMAIL_BODY_TAIL
+)
 
 MESSENGER_DM_TEMPLATE = (
-    "Hey! I build AI assistants for duct cleaning companies. This one answers every "
-    "new lead on your page in seconds, filters out the time-wasters, and flags the "
-    "ready-to-book ones for you{city_clause}. I'm setting it up free for a few "
-    "companies right now to build case studies. Want me to run yours? "
+    "Hey! I'm giving 5 duct cleaning companies a free 10-day run of Nestaro, "
+    "an AI assistant that answers your page messages in seconds, day or night. "
+    "It checks customers are real{city_clause}, quotes your real prices, and "
+    "books them into open slots on your calendar. You just get the finished "
+    "lead. I set it all up for you. Want one of the 5 spots? "
     "(My work: x.com/iamanusbutt)"
 )
 
 # Invariant template prose that must survive assembly byte-for-byte (FR-015)
 AGNOSTIC_INVARIANTS = (
-    "I'll set up an AI assistant that answers your new leads for free, and you keep every job it books. No contract, no cost.",
-    "I'm doing this with a small group of duct cleaning companies to build real case studies.",
-    "Open to it? Reply here and I'll have you running this week.",
+    EMAIL_OFFER_PARAGRAPH,
+    "Here's what it does. Nestaro lives in your Facebook page inbox: when a customer messages, it replies in seconds, day or night, in a normal human voice.",
+    "quotes your real prices (it never invents a number), and books them into a genuinely open slot on your calendar.",
+    "Five spots, first come. Reply here and I'll have yours running this week.",
 )
 
 FB_INVARIANTS = (
-    "I'll set up an AI assistant on your Facebook page for free, and you keep every job it books. No contract, no cost.",
-    "The moment a lead messages or fills out a form, it replies day or night,",
-    "I'm doing this with a small group of duct cleaning companies to build real case studies.",
-    "Open to it? Reply here and I'll have you running this week.",
+    EMAIL_OFFER_PARAGRAPH,
+    "Here's what it does. When someone messages your page, it replies in seconds, day or night, in a normal human voice.",
+    "quotes your real prices (it never invents a number), and books them into a genuinely open slot on your calendar.",
+    "Five spots, first come. Reply here and I'll have yours running this week.",
 )
 
 MESSENGER_INVARIANTS = (
-    "Hey! I build AI assistants for duct cleaning companies.",
-    "I'm setting it up free for a few companies right now to build case studies.",
-    "Want me to run yours? (My work: x.com/iamanusbutt)",
+    "Hey! I'm giving 5 duct cleaning companies a free 10-day run of Nestaro,",
+    "quotes your real prices, and books them into open slots on your calendar.",
+    "Want one of the 5 spots? (My work: x.com/iamanusbutt)",
 )
 
 # Ad-running is never observable and never claimed (Constitution V)
@@ -181,19 +195,10 @@ def assemble_email(prospect: Prospect, slots: dict) -> Draft:
     subject_company = str(slots.get("subject_company", "")).strip() or prospect.company.company
 
     opener = OPENER_GENERIC if is_generic_inbox(prospect.company.email) else OPENER_DIRECT
-    if prospect.variant is Variant.EMAIL_FB:
-        body = EMAIL_FB_TEMPLATE.format(
-            greeting=greeting, opener=opener, hook_phrase=hook_phrase, signature=SIGNATURE
-        )
-    else:
-        channel_clause = WEAK_FB_CLAUSE if prospect.fb_signal is FbSignal.WEAK else ""
-        body = EMAIL_AGNOSTIC_TEMPLATE.format(
-            greeting=greeting,
-            opener=opener,
-            channel_clause=channel_clause,
-            hook_phrase=hook_phrase,
-            signature=SIGNATURE,
-        )
+    template = EMAIL_FB_TEMPLATE if prospect.variant is Variant.EMAIL_FB else EMAIL_AGNOSTIC_TEMPLATE
+    body = template.format(
+        greeting=greeting, opener=opener, hook_phrase=hook_phrase, signature=SIGNATURE
+    )
     subject = SUBJECT_TEMPLATE.format(subject_company=subject_company)
     errors = validate_email_draft(subject, body, prospect, slots)
     return Draft(subject=subject, body=body, model="", validated=not errors, validation_errors=errors)
@@ -234,8 +239,12 @@ def validate_email_draft(subject: str, body: str, prospect: Prospect, slots: dic
     if not body.rstrip().endswith(SIGNATURE):
         errors.append("signature altered or missing")
 
-    if prospect.fb_signal is FbSignal.NONE and "facebook" in lowered:
-        errors.append("facebook mentioned without a supporting signal")
+    # Constitution v2.0.0 Principle V: product-fact Facebook mentions are fine
+    # in every variant; claims about the PROSPECT's page activity belong only
+    # to the strong-signal variant — enforced structurally by template choice
+    # (the agnostic variant contains no their-activity phrasing to alter).
+    if prospect.variant is not Variant.EMAIL_FB and "messages your page" in lowered:
+        errors.append("their-page-activity phrasing in a non-strong variant")
 
     expected = expected_greeting(prospect)
     if not body.startswith(f"Hi {expected},"):

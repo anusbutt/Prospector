@@ -1,5 +1,41 @@
 <!--
 Sync Impact Report
+- Version change: 1.1.0 → 2.0.0 (2026-07-14)
+- Reason: the outreach offer is now the named product Nestaro — an AI agent
+  that answers a business's Facebook Messenger inbox (lead_qualifier_feature.md).
+  The product cannot be described without mentioning Facebook, so Principle V's
+  blanket "no Facebook mention at fb_signal none" rule was REDEFINED with the
+  human's explicit approval (MAJOR bump: principle redefinition).
+- Modified principles: V (Channel Honesty). New rule: claims about the
+  PROSPECT's Facebook usage or advertising remain banned at every signal level
+  and ad-running is still never claimed or implied; describing the PRODUCT's
+  own Facebook capability ("an assistant that answers your Facebook page
+  messages") is permitted in all template variants. Variant selection stays
+  mechanical on fb_signal; what the signal now gates is their-usage claims,
+  not product-fact mentions.
+- Added sections: none. Removed sections: none.
+- Templates requiring updates: PRODUCT.md §7.5/§8 (same amendment), README
+  guarantee #4 wording (public repo), draft.py validator rule.
+- Follow-up TODOs: none
+-->
+
+<!--
+Prior version 1.1.0 Sync Impact Report (2026-07-14)
+- Version change: 1.0.0 → 1.1.0 (2026-07-14)
+- Reason: PRODUCT.md §10 adds an optional company-sourcing stage
+  (`prospector source`: Google Places discovery + on-site Meta Pixel ad-signal)
+  to acquire first users for the Lead Qualifier agent.
+- Modified principles: NONE. Principle II (Facebook never accessed) was
+  explicitly reconsidered at the human's request and REAFFIRMED unchanged:
+  the pixel signal is read from the candidate's own website source only.
+- Added sections: one "Sourcing" bullet under Additional Constraints.
+- Removed sections: none.
+- Templates requiring updates: none (gates unchanged).
+- Follow-up TODOs: none
+-->
+
+<!--
+Prior version 1.0.0 Sync Impact Report (2026-07-13)
 - Version change: (template, unversioned) → 1.0.0
 - Modified principles: all placeholders replaced (initial ratification)
 - Added sections:
@@ -73,18 +109,22 @@ the candidate goes to `name_candidate`, and `needs_review: true` is set. At
 *Rationale: one fabricated name destroys trust in every draft in the batch;
 empty-and-flagged always beats wrong.*
 
-### V. Channel Honesty — Claims Require Observed Signals
+### V. Channel Honesty — Claims About the Prospect Require Observed Signals
 
-Every channel claim in outreach copy MUST be backed by an open-web signal
-observed and recorded during research (`fb_signal` per PRODUCT.md §7.5).
-Ad-running is NEVER claimed or implied — it is not observable from outside
-Facebook and the tool never looks inside. Template selection is mechanical:
-`fb_signal: strong` → Facebook variant; `weak` → channel-agnostic variant with
-at most a conditional Facebook mention; `none` → channel-agnostic variant with
-no Facebook mention. When the signal is uncertain, default DOWN, never up.
+Every claim in outreach copy **about the prospect's own channels** MUST be
+backed by an open-web signal observed and recorded during research
+(`fb_signal` per PRODUCT.md §7.5). Ad-running is NEVER claimed or implied —
+it is not observable from outside Facebook and the tool never looks inside.
+Describing the **product's own capability** (Nestaro answers a Facebook page
+inbox) is a fact about the product, not the prospect, and is permitted in all
+variants *(amended 2026-07-14, v2.0.0)*. Template selection remains
+mechanical: `fb_signal: strong` → variant that references their page activity;
+`weak`/`none` → variant that frames Facebook as product capability only, with
+no assertion about their usage. When the signal is uncertain, default DOWN,
+never up.
 
-*Rationale: pitching a Facebook assistant to someone who doesn't use Facebook
-burns the lead and the sender's credibility.*
+*Rationale: honesty means not asserting things about the prospect we haven't
+observed; it does not forbid saying what the product we're offering does.*
 
 ### VI. Smallest Viable Build — No Gold-Plating
 
@@ -122,6 +162,12 @@ verifiably works.
   template prose is not paraphrased or restyled by the model.
 - **Rate courtesy**: scraping targets are small businesses' websites — fetch
   politely (timeouts, no hammering, respect robots.txt for crawl paths).
+- **Sourcing (PRODUCT.md §10)**: candidate discovery uses the Google Places
+  API only — no directory scraping, no paid lead databases. The Meta Pixel
+  ad signal (`ad_signal`) is detected by string inspection of the candidate's
+  own website source; no Facebook host is ever contacted for it (Principle II
+  applies in full). `ad_signal` filters the candidate list only and MUST NOT
+  surface as an ad-running claim in outreach copy (Principle V applies in full).
 
 ## Development Workflow
 
@@ -149,4 +195,4 @@ verifiably works.
 - **Compliance review**: every plan and PR is checked against Principles I–VII
   before merge; violations block until resolved or the constitution is amended.
 
-**Version**: 1.0.0 | **Ratified**: 2026-07-13 | **Last Amended**: 2026-07-13
+**Version**: 2.0.0 | **Ratified**: 2026-07-13 | **Last Amended**: 2026-07-14

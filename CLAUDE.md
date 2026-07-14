@@ -212,6 +212,8 @@ See `.specify/memory/constitution.md` for code quality, testing, performance, se
 ## Active Technologies
 - Python 3.11+ + Typer (CLI), httpx (HTTP), selectolax (HTML parsing), (001-prospector-cli)
 - Filesystem only — the Obsidian vault is the datastore (notes keyed by (001-prospector-cli)
+- Python 3.11+ (unchanged from 001) + existing only — Typer (new `source` command on the existing (002-company-sourcing)
+- Filesystem only — output is a plain CSV (not a merged store; the vault (002-company-sourcing)
 
 ## Recent Changes
 - 001-prospector-cli: Added Python 3.11+ + Typer (CLI), httpx (HTTP), selectolax (HTML parsing),

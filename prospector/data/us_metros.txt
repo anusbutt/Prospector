@@ -1,0 +1,32 @@
+# Default sourcing sweep: 30 largest US metros (research.md R5).
+# Format: City, ST — one per line. Blank lines and # comments are ignored.
+New York, NY
+Los Angeles, CA
+Chicago, IL
+Dallas, TX
+Houston, TX
+Washington, DC
+Philadelphia, PA
+Atlanta, GA
+Miami, FL
+Phoenix, AZ
+Boston, MA
+San Francisco, CA
+Riverside, CA
+Detroit, MI
+Seattle, WA
+Minneapolis, MN
+San Diego, CA
+Tampa, FL
+Denver, CO
+Baltimore, MD
+St. Louis, MO
+Orlando, FL
+Charlotte, NC
+San Antonio, TX
+Portland, OR
+Sacramento, CA
+Pittsburgh, PA
+Austin, TX
+Las Vegas, NV
+Cincinnati, OH

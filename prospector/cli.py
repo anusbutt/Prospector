@@ -61,6 +61,45 @@ def run(
 
 
 @app.command()
+def source(
+    keyword: str = typer.Option("duct cleaning", "--keyword", help="Service keyword for the Places text query"),
+    metros: Path = typer.Option(None, "--metros", help="Metro list file (City, ST per line; default: bundled 30-metro list)"),
+    out: Path = typer.Option(Path("candidates.csv"), "--out", help="Output CSV path"),
+    keep_all: bool = typer.Option(False, "--all", help="Keep every discovered candidate (default: only ad_signal: pixel)"),
+    max_queries: int = typer.Option(60, "--max-queries", help="Places request budget for this run"),
+    limit: int = typer.Option(None, "--limit", help="Stop after N metros (testing)"),
+    verbose: bool = typer.Option(False, "--verbose", help="Per-step logging to stderr"),
+):
+    """Discover companies for a keyword across US metros and write a candidate CSV."""
+    from prospector.source import load_metros, run_sourcing  # deferred: keeps --help fast
+
+    settings = load_settings()
+    try:
+        settings.require_places()
+        metro_list = load_metros(metros)
+        out_parent = out.resolve().parent
+        if not out_parent.is_dir():
+            raise ConfigError(f"output directory not found: {out_parent}")
+        summary = run_sourcing(
+            settings,
+            keyword=keyword,
+            metros=metro_list,
+            out=out,
+            keep_all=keep_all,
+            max_queries=max_queries,
+            limit=limit,
+            verbose=verbose,
+        )
+    except ConfigError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(1)
+    except Exception as exc:
+        typer.echo(f"unexpected error: {exc}", err=True)
+        raise typer.Exit(2)
+    _print_sourcing_summary(summary)
+
+
+@app.command()
 def dashboard(
     vault_dir: Path = typer.Option(None, "--vault", help="Vault folder to refresh (default: Vault/Outreach)"),
 ):
@@ -74,6 +113,23 @@ def dashboard(
         raise typer.Exit(1)
     result = write_dashboard(target)
     typer.echo(f"_Dashboard.md {result} in {target}")
+
+
+def _print_sourcing_summary(summary) -> None:
+    typer.echo(f"\nProspector source: {summary.metros_covered}/{summary.metros_total} metros covered")
+    typer.echo(f"  queries used: {summary.queries_used}/{summary.query_budget}")
+    typer.echo(
+        f"  discovered: {summary.discovered}   duplicates collapsed: {summary.duplicates_collapsed}"
+    )
+    typer.echo(
+        f"  pixel-positive: {summary.pixel_positive}   emails found: {summary.emails_found}   rows written: {summary.written}"
+    )
+    if summary.written == 0 and summary.kept_with_all > 0:
+        typer.echo(f"  note: 0 rows written; --all would have kept {summary.kept_with_all}")
+    if summary.failures:
+        typer.echo("")
+        for name, reason in summary.failures:
+            typer.echo(f"  failed: {name}  {reason}")
 
 
 def _print_summary(summary: RunSummary) -> None:

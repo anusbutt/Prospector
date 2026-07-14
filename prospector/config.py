@@ -29,6 +29,13 @@ class Settings:
                 "or run with --no-llm to skip drafting."
             )
 
+    def require_places(self) -> None:
+        if not self.places_key:
+            raise ConfigError(
+                "GOOGLE_PLACES_API_KEY is not set. Add it to .env (see .env.example); "
+                "sourcing has no fallback discovery mechanism."
+            )
+
 
 def load_settings(env_file: str | Path = ".env") -> Settings:
     # override=False: real environment variables win over .env values
