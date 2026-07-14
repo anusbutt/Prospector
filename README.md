@@ -149,10 +149,18 @@ CSV or markdown table. Minimum columns: `company`, `email`. Optional:
 case-insensitive; unknown columns are ignored with a warning; malformed rows
 are reported by number without aborting the batch.
 
-See [`samples/companies.example.csv`](samples/companies.example.csv) for a
-fictional list exercising every feature: email and messenger buckets, a
-Facebook-URL email field, a human-supplied owner name, and a shared-inbox
-duplicate pair.
+A fictional example exercising every input feature (email and messenger
+buckets, a Facebook-URL email field, a human-supplied owner name, and a
+shared-inbox duplicate pair):
+
+```csv
+company,email,website,city,owner_name,notes
+Summit Duct Care,info@summitduct.example.com,summitduct.example.com,Denver,,
+Peak Vent Cleaning,messenger,,Boulder,,prefers DMs
+Alpine Air Ducts,https://facebook.com/alpineairducts,,Fort Collins,,
+Mile High Ducts,scott@milehighducts.example.com,milehighducts.example.com,,Scott Bell,referral
+Mile High Dryer Vents,scott@milehighducts.example.com,milehighducts.example.com,Denver,,same owner
+```
 
 ## Usage
 
