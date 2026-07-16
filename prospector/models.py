@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 
 
 class Channel(str, Enum):
@@ -103,6 +104,94 @@ class Draft:
     model: str
     validated: bool = True
     validation_errors: list[str] = field(default_factory=list)
+
+
+class SendOutcome(str, Enum):
+    SENT = "sent"
+    DEFERRED_CAP = "deferred_cap"
+    SKIPPED_NOT_APPROVED = "skipped_not_approved"
+    SKIPPED_NOT_SENDABLE = "skipped_not_sendable"
+    SKIPPED_ALREADY_SENT = "skipped_already_sent"
+    FAILED = "failed"
+
+
+@dataclass
+class SendCandidate:
+    """A parsed, sendable view of one approved vault note (data-model.md)."""
+
+    slug: str
+    company: str
+    recipient: str | None
+    channel: str
+    subject: str | None
+    body: str | None
+    note_path: "Path"
+    approved_at: float = 0.0  # sort key for oldest-approved-first (note mtime)
+
+    def sendable_error(self) -> str | None:
+        """Return a reason string if this candidate is NOT sendable, else None."""
+        if self.channel != Channel.EMAIL.value:
+            return "not an email-channel note"
+        if not self.recipient or "@" not in self.recipient or "." not in self.recipient.split("@")[-1]:
+            return "missing or invalid email address"
+        if not self.subject or not self.subject.strip():
+            return "draft has no subject"
+        if not self.body or not self.body.strip():
+            return "draft has no body"
+        return None
+
+
+@dataclass
+class LedgerRecord:
+    """One append-only send-ledger row (contracts/ledger.schema.md)."""
+
+    ts: str
+    slug: str
+    recipient: str
+    company: str
+    message_id: str | None
+    result: str  # "sent" | "failed"
+    error: str | None
+    from_account: str
+
+
+@dataclass
+class SendResult:
+    slug: str
+    recipient: str | None
+    outcome: SendOutcome
+    detail: str = ""
+
+
+@dataclass
+class RunReport:
+    dry_run: bool = True
+    cap_today: int = 0
+    already_today: int = 0
+    results: list[SendResult] = field(default_factory=list)
+
+    def count(self, outcome: SendOutcome) -> int:
+        return sum(1 for r in self.results if r.outcome == outcome)
+
+    @property
+    def sent(self) -> int:
+        return self.count(SendOutcome.SENT)
+
+    @property
+    def deferred(self) -> int:
+        return self.count(SendOutcome.DEFERRED_CAP)
+
+    @property
+    def failed(self) -> int:
+        return self.count(SendOutcome.FAILED)
+
+    @property
+    def skipped(self) -> int:
+        return (
+            self.count(SendOutcome.SKIPPED_NOT_APPROVED)
+            + self.count(SendOutcome.SKIPPED_NOT_SENDABLE)
+            + self.count(SendOutcome.SKIPPED_ALREADY_SENT)
+        )
 
 
 @dataclass

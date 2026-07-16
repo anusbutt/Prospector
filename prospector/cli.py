@@ -1,8 +1,12 @@
 """Typer CLI — the tool's entire input surface (contracts/cli.md).
 
-Exit codes: 0 = batch completed (per-company failures allowed);
+Exit codes (run/source): 0 = batch completed (per-company failures allowed);
 1 = pre-flight failure (nothing written); 2 = unexpected mid-run crash.
-There is no send command and never will be (Constitution I).
+
+The `send` command (feature 003, Constitution v3.0.0 Principle I) delivers only
+human-approved notes, dry-run by default. Its exit codes: 0 = completed;
+1 = pre-flight failure; 2 = identity mismatch (wrong account, nothing sent);
+3 = missing/failed OAuth. Per-message send failures are non-fatal (exit 0).
 """
 
 from pathlib import Path
@@ -113,6 +117,74 @@ def dashboard(
         raise typer.Exit(1)
     result = write_dashboard(target)
     typer.echo(f"_Dashboard.md {result} in {target}")
+
+
+@app.command()
+def send(
+    real: bool = typer.Option(False, "--send", help="Actually send. Default is a dry-run preview."),
+    limit: int = typer.Option(None, "--limit", help="Send at most N notes this run (still capped)"),
+    vault: Path = typer.Option(None, "--vault", help="Vault folder (default: Vault/Outreach)"),
+    yes: bool = typer.Option(False, "--yes", help="Skip the pre-send confirmation prompt"),
+):
+    """Send human-approved notes (status: approved) via Gmail. Dry-run by default."""
+    from prospector.gmail import AuthError
+    from prospector.send import IdentityError, authorize_and_verify, run_send
+
+    settings = load_settings()
+    target = vault or settings.vault_dir
+    if not target.is_dir():
+        typer.echo(f"error: vault folder not found: {target}", err=True)
+        raise typer.Exit(1)
+
+    creds = None
+    if real:
+        try:
+            creds = authorize_and_verify(settings)
+        except IdentityError as exc:
+            typer.echo(f"error: {exc}", err=True)
+            raise typer.Exit(2)
+        except AuthError as exc:
+            typer.echo(f"error: {exc}", err=True)
+            raise typer.Exit(3)
+        if not yes:
+            preview = run_send(settings, vault_dir=target, dry_run=True, limit=limit)
+            typer.echo(
+                f"About to really send {preview.sent} email(s) from {settings.send_from} "
+                f"(today's cap {preview.cap_today}, already sent {preview.already_today})."
+            )
+            if not typer.confirm("Proceed?"):
+                typer.echo("aborted; nothing sent.")
+                raise typer.Exit(0)
+
+    try:
+        report = run_send(settings, vault_dir=target, dry_run=not real, limit=limit, creds=creds)
+    except Exception as exc:
+        typer.echo(f"unexpected error: {exc}", err=True)
+        raise typer.Exit(1)
+    _print_send_report(report)
+
+
+def _print_send_report(report) -> None:
+    from prospector.models import SendOutcome
+
+    mode = "SENT" if not report.dry_run else "WOULD SEND (dry-run)"
+    typer.echo(f"\nProspector send [{mode}]")
+    typer.echo(f"  today's cap: {report.cap_today}   already sent today: {report.already_today}")
+    typer.echo(
+        f"  {'sent' if not report.dry_run else 'to send'}: {report.sent}   "
+        f"deferred (cap): {report.deferred}   skipped: {report.skipped}   failed: {report.failed}"
+    )
+    interesting = {
+        SendOutcome.SENT,
+        SendOutcome.FAILED,
+        SendOutcome.DEFERRED_CAP,
+    }
+    rows = [r for r in report.results if r.outcome in interesting]
+    if rows:
+        typer.echo("")
+        width = max(len(r.slug) for r in rows)
+        for r in rows:
+            typer.echo(f"  {r.slug.ljust(width)}  {r.outcome.value:12}  {r.detail}")
 
 
 def _print_sourcing_summary(summary) -> None:

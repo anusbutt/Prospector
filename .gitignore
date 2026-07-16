@@ -10,3 +10,6 @@ dist/
 history/
 tests/
 samples/
+secrets/
+*client_secret*.json
+send_ledger.jsonl

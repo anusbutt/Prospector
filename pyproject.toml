@@ -15,6 +15,8 @@ dependencies = [
     "trafilatura>=1.8",
     "python-dotenv>=1.0",
     "pyyaml>=6.0",
+    "google-auth>=2.0",
+    "google-auth-oauthlib>=1.0",
 ]
 
 [project.optional-dependencies]
