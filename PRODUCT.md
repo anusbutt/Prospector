@@ -57,7 +57,7 @@ Realistic name hit rate: ~40–60%. That's fine — the job is lift, not perfect
 company: Boston Air Duct Cleaning
 email: info@bostonairduct.com
 channel: email            # email | messenger
-status: to-send           # to-send | sent | replied | pilot | dead
+status: to-send           # to-send | approved | sent | replied | pilot | dead  (approved → sent is the only machine-made change; see §11)
 name_used: team           # first name, or "team"
 name_confidence: none     # high | medium | none
 name_candidate:           # populated when medium, for human review

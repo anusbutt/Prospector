@@ -7,7 +7,9 @@ Cold outreach converts far better when each message carries the owner's first
 name and one specific, true hook. Producing that by hand across a list is slow,
 repetitive research: find the site, dig for a name, note the city, catch
 duplicate inboxes, sort out who has no email. Prospector automates the research
-and personalization — the expensive part — and leaves sending to you.
+and personalization — the expensive part — and then sends only the drafts **you
+approve**, from a dedicated account, under strict guardrails (dry-run by default,
+a ramped daily cap, and a ledger that prevents double-sends).
 
 Built for duct-cleaning outreach first; the pipeline itself is
 vertical-agnostic.
@@ -37,7 +39,16 @@ ingest ──► dedupe & bucket ──► resolve ──► fetch ──► ext
                                 (Places /   (polite,   (names,     (§ conf-  (locked    (one note per
                                  DuckDuckGo)  FB-host    city, hook, idence +  templates, company +
                                               blocked)   FB signals) fb_signal) 1 LLM call) dashboard)
+      │
+      ▼
+YOU review in Obsidian ──► set status: approved ──► prospector send ──► Gmail
+   (fix / approve / reject)      (your green light)     (dry-run default,   (from the
+                                                         cap + pace +        Nestaro
+                                                         ledger)             account)
 ```
+
+`prospector source` (optional) builds the input list; `prospector send` (optional)
+delivers the approved drafts. The core `run` is everything in between.
 
 1. **Ingest & dedupe** — parses CSV or markdown tables, normalizes rows, and
    detects shared inboxes (identical emails always group; shared custom domains
@@ -110,8 +121,13 @@ cp .env.example .env   # then add your keys
 | `OPENROUTER_MODEL` | No | Defaults to `anthropic/claude-sonnet-4.5` |
 | `GOOGLE_PLACES_API_KEY` | For `source` | `source` exits pre-flight (no fallback discovery); `run`'s website/city resolution falls back to DuckDuckGo only |
 | `HUNTER_API_KEY` | No | Email-name enrichment skipped (capped at medium confidence when present) |
+| `PROSPECTOR_SEND_FROM` | For `send` | Defaults to `nestaroassistant@gmail.com`; the tool refuses to send from any other account |
+| `PROSPECTOR_SEND_CAPS` | No | Weekly daily-cap ramp; defaults to `15,30,60,100` (last value applies to week 4+) |
+| `PROSPECTOR_SEND_DELAY` | No | Randomized seconds between real sends; defaults to `30,90` |
 
-Secrets live in `.env` (gitignored). Nothing is ever logged or committed.
+Secrets live in `.env` (gitignored). Nothing is ever logged or committed. The
+`send` command's OAuth client secret and token live under `secrets/` (also
+gitignored); the append-only `send_ledger.jsonl` stays local too.
 
 ## Sourcing (optional): build the list itself
 
@@ -231,11 +247,55 @@ Dataview, everything still works as plain markdown.
 1. Open the vault folder in Obsidian.
 2. **Needs review** queue: confirm or reject `name_candidate` suggestions,
    clear `needs_review`.
-3. **To-send** queue: read the draft, paste it into your own inbox, send, and
-   set `status: sent`.
-4. Re-run whenever the list changes. The tool updates its own fields and never
-   overwrites yours — `status` is written once and never machine-changed
-   again, and `## Log` plus any custom sections are preserved verbatim.
+3. **To-send** queue: read the draft. When you're happy with one, set
+   `status: approved` — that is your explicit green light to send it.
+4. Run `prospector send` (see [Sending](#sending-optional-deliver-approved-drafts)):
+   it previews by default, and with `--send` delivers the approved notes and
+   flips each to `status: sent`.
+5. Re-run `run` whenever the list changes. The tool updates its own fields and
+   never overwrites yours — the **only** status change it ever makes is the
+   sanctioned `approved → sent` step during a real send; your other `status`
+   edits, `## Log` entries, and any custom sections are preserved verbatim.
+
+## Sending (optional): deliver approved drafts
+
+`prospector send` delivers the notes you have marked `status: approved` — and
+only those — as plain emails from a dedicated account. It is **dry-run by
+default**: with no flag it previews exactly what it would send and touches
+nothing. A real send requires `--send`.
+
+```bash
+# after approving notes in Obsidian (status: approved):
+prospector send                     # DRY-RUN preview (sends nothing, changes nothing)
+prospector send --send              # actually send (first run does a one-time Google OAuth)
+prospector send --send --limit 5    # send at most 5 this run (still capped)
+prospector send --send --vault ~/Obsidian/Outreach
+```
+
+Each real send, in order: verifies the authorized account is `PROSPECTOR_SEND_FROM`
+(and **refuses** otherwise — never a personal account), checks today's remaining
+allowance against the ramped cap, skips anyone already in the ledger, sends via the
+Gmail API, records a ledger line, flips the note to `status: sent`, then waits a
+randomized 30–90s before the next one.
+
+- **The ledger** (`send_ledger.jsonl`, append-only, gitignored) is the source of
+  truth for the daily count and for **double-send prevention** — a recipient or
+  note already recorded as sent is never sent again, even if its status is reset.
+  A crashed run resumes safely: just run it again.
+- **The daily cap ramps** (default `15 → 30 → 60 → 100` per week), anchored on your
+  first send, so a new account builds reputation instead of getting flagged.
+- **Failures are isolated**: a single send that errors leaves its note `approved`,
+  logs the reason, and the run continues — nothing is silently dropped or double-sent.
+
+Exit codes for `send`: `0` completed (per-message failures are reported, not fatal),
+`1` pre-flight failure, `2` wrong account (nothing sent), `3` missing/failed OAuth.
+
+**One-time setup:** a Google Cloud project with the Gmail API enabled and a Desktop
+OAuth client; put its client-secret JSON at `secrets/gmail_client_secret.json`. The
+first `--send` opens a browser consent (sign in as the Nestaro account); the token
+is then saved to `secrets/gmail_token.json` and reused. A free Gmail can't publish
+SPF/DKIM/DMARC, so warm the account up and expect the realistic cap to plateau below
+100 — deliverability, not the code, is the limiting factor.
 
 ## Design notes
 
