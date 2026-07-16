@@ -21,7 +21,7 @@ These are hard constraints enforced in code and tests, not aspirations
 
 | # | Guarantee | How it's enforced |
 |---|-----------|-------------------|
-| 1 | **Never sends anything** | There is no send code path, no SMTP/API dependency, and no `send` command. Output is drafts in markdown. |
+| 1 | **Sends only what a human approved** | The pipeline drafts; `prospector send` delivers **only** notes marked `status: approved`, dry-run by default (real sends need `--send`), Gmail API only from the dedicated Nestaro account (never a personal account), under a ramped daily cap, with an append-only ledger that prevents double-sends. It never auto-approves, never sends off-channel, and never exceeds the cap. |
 | 2 | **Never touches Facebook** | Every outbound request passes through one HTTP choke point that raises on `facebook.com`, `fb.com`, `fb.me`, `fbcdn.net`, and `messenger.com` before any network activity. A `facebook_url` input is stored as a signal and never fetched. |
 | 3 | **Never fabricates a name** | A real first name appears in a draft only at high confidence, and only when it traces to a recorded source (a page URL and excerpt). A validator rejects any unsourced name, even if the LLM produces one. |
 | 4 | **Never claims what it can't observe** | Ad-running is never claimed or implied. Statements about the *prospect's own* Facebook activity appear only when observed open-web signals support them (uncertain signals always rank *down*); describing the offered product's Facebook capability is a product fact, not a claim about the prospect. |
@@ -171,6 +171,11 @@ prospector run companies.csv --limit 3             # try a few rows first
 prospector run companies.csv --no-llm              # research & score only
 prospector run companies.csv --only summit-duct-care
 prospector dashboard --vault ~/Obsidian/Outreach   # refresh _Dashboard.md only
+
+# Approve notes in Obsidian (set status: approved), then:
+prospector send                                    # DRY-RUN preview (default; sends nothing)
+prospector send --send                             # actually send approved notes (first run does one-time OAuth)
+prospector send --send --limit 5                   # send at most 5 this run (still capped)
 ```
 
 Exit codes: `0` batch completed (individual company failures are isolated and

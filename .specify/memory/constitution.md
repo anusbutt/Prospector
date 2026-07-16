@@ -1,5 +1,31 @@
 <!--
 Sync Impact Report
+- Version change: 2.0.0 → 3.0.0 (2026-07-15)
+- Reason: Nestaro outreach now requires automated sending of human-approved
+  drafts at controlled volume (100/day goal, ramped). Principle I's absolute
+  "MUST NOT send ... no sending code path may be added" is REDEFINED into a
+  narrow, guarded-send exception (MAJOR bump: principle redefinition). Enables
+  feature 003-approved-send.
+- Modified principles: I (No Email Sender → Human-Approved Sending Only).
+  New rule: drafts by default; sends ONLY notes a human marked `status: approved`
+  in the vault; Gmail API only, from the designated Nestaro outreach account
+  (nestaroassistant@gmail.com), never the operator's personal account; hard
+  ramped daily cap; dry-run default (real sends require an explicit flag); every
+  send appended to an immutable ledger; never auto-approve, never another
+  channel, never past the cap.
+- Modified principles: VI (Smallest Viable Build) — exclusion list updated: a
+  guarded, approval-gated Gmail sender is now IN scope; CRM features, web UI, and
+  agent frameworks remain excluded.
+- Added sections: none. Removed sections: none.
+- Templates requiring updates: ✅ plan-template.md Constitution Check (no "no
+  sender" gate present) ⚠ PRODUCT.md §2/§7.5 sending language (pending 003 spec)
+  ⚠ README guarantee wording, public repo (pending 003 spec).
+- Follow-up TODOs: reconcile PRODUCT.md + README "sending is manual" language
+  during 003-approved-send spec.
+-->
+
+<!--
+Prior version 2.0.0 Sync Impact Report (2026-07-14)
 - Version change: 1.1.0 → 2.0.0 (2026-07-14)
 - Reason: the outreach offer is now the named product Nestaro — an AI agent
   that answers a business's Facebook Messenger inbox (lead_qualifier_feature.md).
@@ -61,15 +87,29 @@ a change that violates one MUST be rejected or the constitution amended first.
 
 ## Core Principles
 
-### I. No Email Sender (Research and Draft Only)
+### I. Human-Approved Sending Only (Draft-First, Guarded Send)
 
-The tool MUST NOT send email or messages of any kind, on any channel, through
-any mechanism (SMTP, API, browser automation, or otherwise). Its output is
-drafts; sending is performed manually by the human from their own inbox.
-No task, dependency, or code path related to sending may be added.
+The tool drafts by default and MUST NOT send anything a human has not explicitly
+marked `status: approved` in the vault. When it sends, it MUST:
 
-*Rationale: sending is trivial and already solved; a DIY sender saves nothing
-and risks the human's domain reputation.*
+- send **only via the Gmail API**, from the designated Nestaro outreach account
+  (`nestaroassistant@gmail.com`) — **never** the operator's personal account and
+  never any other channel (no SMTP, no browser automation, no Messenger send);
+- **never exceed the configured daily cap** (a ramped schedule, not a flat
+  number), enforced against the send ledger;
+- **default to dry-run**: a real send requires an explicit flag; absent it, the
+  tool only reports what it *would* send;
+- **append every send to an immutable ledger** (recipient, note, timestamp,
+  message id, result) — the ledger is the source of truth for the daily count
+  and the audit trail;
+- **never auto-approve, never bulk-send past the cap**, and never send a note
+  whose `status` is anything other than `approved`.
+
+*Rationale: automating human-approved sends at controlled volume is now a
+product requirement (Nestaro outreach at scale). The guardrails keep the human
+as the sole approver, protect the sending account's reputation via a ramped cap,
+and make double-sends impossible via the ledger — while still forbidding the
+personal account and any unapproved or off-channel send.*
 
 ### II. Open Web Only — Facebook Is Never Accessed
 
@@ -129,8 +169,9 @@ observed; it does not forbid saying what the product we're offering does.*
 ### VI. Smallest Viable Build — No Gold-Plating
 
 Scope is bounded by PRODUCT.md; features not specified there MUST NOT be
-built (explicitly excluded: email sender, CRM features, web UI, agent
-frameworks). LLM usage is single-shot prompt-per-company via OpenRouter with
+built (explicitly excluded: CRM features, web UI, agent frameworks; a guarded,
+approval-gated Gmail sender is IN scope per Principle I). LLM usage is
+single-shot prompt-per-company via OpenRouter with
 direct API calls — no LangChain or other agent/orchestration framework.
 External services are called via direct HTTP/SDK calls. Prefer the smallest
 viable diff; do not refactor unrelated code; add persistence (SQLite) only if
@@ -195,4 +236,4 @@ verifiably works.
 - **Compliance review**: every plan and PR is checked against Principles I–VII
   before merge; violations block until resolved or the constitution is amended.
 
-**Version**: 2.0.0 | **Ratified**: 2026-07-13 | **Last Amended**: 2026-07-14
+**Version**: 3.0.0 | **Ratified**: 2026-07-13 | **Last Amended**: 2026-07-15

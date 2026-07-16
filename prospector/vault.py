@@ -176,6 +176,82 @@ def parse_note(text: str) -> tuple[dict[str, str], list[tuple[str, str]]]:
     return frontmatter, sections
 
 
+def parse_draft(text: str) -> tuple[str, str] | None:
+    """Extract (subject, body) from a note's ## Draft section.
+
+    Subject is the first `**Subject:**` line; body is everything after it.
+    Returns None if the Draft section, subject, or body is missing/empty
+    (such notes are not sendable — FR-013)."""
+    _, sections = parse_note(text)
+    draft = dict(sections).get("Draft")
+    if draft is None:
+        return None
+    lines = draft.split("\n")
+    subject: str | None = None
+    rest_start = 0
+    for i, line in enumerate(lines):
+        if line.strip().startswith("**Subject:**"):
+            subject = line.split("**Subject:**", 1)[1].strip()
+            rest_start = i + 1
+            break
+    if not subject:
+        return None
+    body = "\n".join(lines[rest_start:]).strip("\n")
+    if not body.strip():
+        return None
+    return subject, body
+
+
+def set_status(path: str | Path, new_status: str, log_line: str) -> None:
+    """Scoped, machine-owned status transition (Constitution v3.0.0, Principle I).
+
+    Rewrites ONLY the frontmatter `status:` value and appends one `## Log` bullet,
+    leaving every other frontmatter key and section (incl. human ## Log history and
+    unrecognized sections) byte-identical. This is the single status write the tool
+    is permitted to make (approved → sent); it deliberately does not go through
+    merge_notes, which treats status as human-owned during `run`."""
+    path = Path(path)
+    text = path.read_text(encoding="utf-8")
+    trailing_newline = text.endswith("\n")
+    lines = text.split("\n")
+    if trailing_newline and lines and lines[-1] == "":
+        lines.pop()  # normalize; re-added on write
+
+    # 1) rewrite the status line inside the frontmatter block
+    if lines and lines[0] == "---":
+        for i in range(1, len(lines)):
+            if lines[i] == "---":
+                break
+            if lines[i].startswith("status:"):
+                lines[i] = f"status: {new_status}"
+                break
+
+    # 2) append a bullet to the ## Log section (preserving everything else)
+    bullet = f"- {log_line}"
+    log_idx = next((i for i, ln in enumerate(lines) if ln.strip() == "## Log"), None)
+    if log_idx is None:
+        lines += ["", "## Log", bullet]
+    else:
+        end = next(
+            (j for j in range(log_idx + 1, len(lines)) if lines[j].startswith("## ")),
+            len(lines),
+        )
+        # trim trailing blank lines within the Log section
+        while end > log_idx + 1 and lines[end - 1] == "":
+            end -= 1
+        body = [ln for ln in lines[log_idx + 1 : end] if ln.strip()]
+        if body == ["-"]:  # replace the lone placeholder
+            placeholder_idx = lines.index("-", log_idx + 1)
+            lines[placeholder_idx] = bullet
+        else:
+            lines.insert(end, bullet)
+
+    out = "\n".join(lines)
+    if trailing_newline:
+        out += "\n"
+    path.write_text(out, encoding="utf-8")
+
+
 def merge_notes(existing: str, fresh: str) -> str:
     """Section-ownership merge (contracts/note-format.md):
     machine-owned (from fresh): all frontmatter except status, ## Draft,
