@@ -101,47 +101,49 @@ Holds **Dataview** queries (community plugin — note in README; plain notes sti
 
 We can't verify ads, but we can cheaply gauge whether Facebook is even a channel they use — all from the open web, never from inside FB:
 
-- **strong** → two or more of: website prominently links to / embeds their Facebook page; site has a Messenger/FB chat widget; Google/search results show an active FB page (recent posts or reviews); `facebook_url` given as input and the page resolves as active in search. → Draft the **Facebook variant** (references their page activity directly: "when someone messages your page").
-- **weak** / **none** → one soft signal or nothing findable. → Draft the **channel-agnostic variant**: Facebook appears only as a fact about the product ("Nestaro lives in your Facebook page inbox"), with no assertion about their page usage or activity.
+- **strong** → two or more of: website prominently links to / embeds their Facebook page; site has a Messenger/FB chat widget; Google/search results show an active FB page (recent posts or reviews); `facebook_url` given as input and the page resolves as active in search.
+- **weak** / **none** → one soft signal or nothing findable.
 
-Honesty rule mirrors §7: when unsure, **default down** (`weak`/`none`), never up. *(Amended 2026-07-14, constitution v2.0.0: the product is Nestaro, a Facebook-Messenger agent — it cannot be described without naming Facebook. The signal now gates claims about the prospect's usage, not product-fact mentions. Ad-running is still never claimed at any level.)*
+The signal is researched and recorded in frontmatter for review (and remains available to future copy variants). *(Copy revision 2026-07-17: the current email template is **channel-neutral** — it describes what the product does for leads without naming Facebook or asserting anything about the prospect's channels, so both signal levels share one body. This satisfies the honesty gate trivially: a claims-free draft is always "defaulted down".)*
+
+Honesty rule mirrors §7: when unsure, **default down** (`weak`/`none`), never up. *(Amended 2026-07-14, constitution v2.0.0: the offered product is a Facebook-Messenger agent; the signal gates claims about the prospect's usage, not product-fact mentions. Ad-running is still never claimed at any level. Rebranded 2026-07-17: the product is Omniveer's **Duct Lead Qualifier**, formerly "Nestaro"; the rule is unchanged.)*
 
 ## 8. Locked message templates
 
 Model fills bracketed slots only. Voice: short, human, practitioner. No hashtags. No AI-sounding language. No em-dash pile-ups.
 
-The offer *(updated 2026-07-14)*: **Nestaro** (`lead_qualifier_feature.md`) — free 10-day run for 5 duct-cleaning companies, set up entirely by Anas.
+The offer *(rebranded 2026-07-17)*: **Duct Lead Qualifier** by **Omniveer** (`lead_qualifier_feature.md`, https://www.omniveer.com/duct-lead-qualifier) — free 10-day run for 5 duct-cleaning companies, set up entirely by Anas, Founder at Omniveer.
 
-**Variant selection:** `fb_signal: strong` → Facebook variant. `weak` / `none` → channel-agnostic variant. Messenger bucket → Messenger DM.
+**Link strategy (2026-07-17):** each email body carries **exactly one promotional link** — the product page (it hosts the explanation and demo, so no separate video link and no attachment). The homepage (https://www.omniveer.com) is reserved for messages about Omniveer broadly, never combined with the product link, and does not appear in these product-outreach templates. The LinkedIn company page (https://www.linkedin.com/company/omniveer/) never appears in the pitch; it may appear only in a compact signature when appropriate — the locked templates omit it rather than force it into every email. No booking link unless one is explicitly configured later. Sign-off: "Anas / Founder at Omniveer" — personal and founder-led; Omniveer is mentioned naturally, the prospect stays the focus; no invented problems, compliments, metrics, integrations, or urgency; no guaranteed bookings/revenue/response claims; each email ends with one simple, low-pressure question.
 
-### Email — Facebook variant (`fb_signal: strong`)
+**Variant selection *(copy revision 2026-07-17)*:** email channel → the single **channel-neutral email template** below (both `fb_signal` levels; the copy makes no claims about the prospect's channels, so the §7.5 gate is trivially satisfied — the signal is still researched and recorded). Messenger bucket → Messenger DM.
+
+### Email — channel-neutral (all `fb_signal` levels)
 ```
-Subject: free setup for [Company], you keep the bookings
+Subject: Free 10-day pilot for [Company Name]
 
-Hi [Name or "[Company] team"],
+Hi [First Name or "[Company] team"],
 
-[If info@ inbox: "Straight to it, and if this isn't your department, please forward it to whoever handles your bookings."  Else: "Straight to it."]
+I'm giving 5 duct-cleaning companies a free 10-day pilot of the Omniveer Duct Lead Qualifier.
 
-I'm giving 5 duct cleaning companies a free 10-day run of Nestaro, an AI assistant that answers your Facebook page messages for you. I set everything up; it costs you nothing for the ten days.
+It responds to new leads, qualifies them, books appointments when they're ready, sends the full details to your email, and keeps every lead organized in a dashboard.
 
-Here's what it does. When someone messages your page, it replies in seconds, day or night, in a normal human voice. It checks they're [hook: "in your service area" / "around [city]"], quotes your real prices (it never invents a number), and books them into a genuinely open slot on your calendar. You get the finished lead by email: name, phone, address, service, and time. Anything it shouldn't answer gets flagged to you instead of guessed.
+You can see the short demo here:
+https://www.omniveer.com/duct-lead-qualifier
 
-Five spots, first come. Reply here and I'll have yours running this week.
+Reply to this email if you'd like one of the five pilot spots, or book a demo through the page.
 
 Anas
-x.com/iamanusbutt
-linkedin.com/in/anus-yousuf
+Founder, Omniveer
 ```
 
-### Email — channel-agnostic variant (`fb_signal: weak` / `none`)
-Identical except the second paragraph opens as product-fact, asserting nothing about their page activity.
-```
-Here's what it does. Nestaro lives in your Facebook page inbox: when a customer messages, it replies in seconds, day or night, in a normal human voice. It checks they're [hook], quotes your real prices (it never invents a number), and books them into a genuinely open slot on your calendar. You get the finished lead by email: name, phone, address, service, and time. Anything it shouldn't answer gets flagged to you instead of guessed.
-```
+The greeting still follows §7's name-confidence rules ("[Company] team" below high
+confidence). The "book a demo through the page" close refers to the product page
+already linked — it adds no second URL (link strategy above holds: one link).
 
 ### Messenger DM (messenger bucket)
 ```
-Hey! I'm giving 5 duct cleaning companies a free 10-day run of Nestaro, an AI assistant that answers your page messages in seconds, day or night. It checks customers are real[, around [city]], quotes your real prices, and books them into open slots on your calendar. You just get the finished lead. I set it all up for you. Want one of the 5 spots? (My work: x.com/iamanusbutt)
+Hey! I'm giving 5 duct cleaning companies a free 10-day run of Duct Lead Qualifier, an AI assistant that answers your page messages in seconds, day or night. It checks customers are real[, around [city]], quotes your real prices, and books them into open slots on your calendar. You just get the finished lead. I set it all up for you. Want one of the 5 spots? (See it working: https://www.omniveer.com/duct-lead-qualifier)
 ```
 
 ## 9. Success criteria
@@ -149,14 +151,14 @@ Hey! I'm giving 5 duct cleaning companies a free 10-day run of Nestaro, an AI as
 - Feeds a raw company list, returns an Obsidian vault of paste-ready, personalized drafts.
 - Names used only when confidence is high; nothing fabricated.
 - Duplicates caught; messenger-only companies sorted and given DM drafts.
-- The Facebook pitch is only used when open-web signals support it; otherwise the draft is channel-agnostic. Ad-running is never claimed or assumed.
+- Claims about the prospect's own channels appear only when open-web signals support them — the current email copy makes none (channel-neutral at every signal level). Ad-running is never claimed or assumed.
 - Re-running is safe (idempotent, non-destructive).
 - Build stayed in scope: no sender, no FB scraping, no web UI.
 - Sourcing (§10): from a keyword + metro list, produces a deduped candidate CSV filtered to pixel-positive companies, in the §6 input format, without ever contacting a Facebook host — and `ad_signal` never appears as a claim in any draft.
 
 ## 10. Company sourcing (`prospector source`)
 
-**Why:** the outreach in §8 offers free setup of the **Lead Qualifier agent** — an assistant that answers incoming leads instantly, qualifies them, books the good ones into a dashboard, and notifies the owner. Its best first users are duct-cleaning companies already paying for Meta ads (they have lead flow worth qualifying). §§1–9 assume a list already exists; this stage builds that list.
+**Why:** the outreach in §8 offers free setup of **Duct Lead Qualifier** (Omniveer) — an assistant that answers incoming leads instantly, qualifies them, books the good ones into a dashboard, and notifies the owner. Its best first users are duct-cleaning companies already paying for Meta ads (they have lead flow worth qualifying). §§1–9 assume a list already exists; this stage builds that list.
 
 **What it does:**
 

@@ -14,7 +14,7 @@ import httpx
 # Facebook-owned surfaces: never contacted, under any circumstances.
 BLOCKED_HOSTS = ("facebook.com", "fb.com", "fb.me", "fbcdn.net", "messenger.com")
 
-USER_AGENT = "Prospector/0.1 (open-web outreach research; +https://x.com/iamanusbutt)"
+USER_AGENT = "Prospector/0.1 (open-web outreach research; +https://www.omniveer.com)"
 
 TIMEOUT = httpx.Timeout(15.0, connect=10.0)
 MAX_RETRIES = 2

@@ -1,5 +1,21 @@
 <!--
 Sync Impact Report
+- Version change: 4.0.0 → 4.0.1 (2026-07-17)
+- Reason: the offered product is rebranded — "Nestaro" becomes Omniveer's
+  "Duct Lead Qualifier" (https://www.omniveer.com/duct-lead-qualifier).
+  PATCH: Principle V's product-name reference is updated; the rule itself
+  (prospect-usage claims gated by observed signals; product facts allowed;
+  ad-running never claimed) is unchanged.
+- Modified principles: V (name/example wording only — no rule change).
+- Added sections: none. Removed sections: none.
+- Templates requiring updates: ✅ PRODUCT.md §7.5/§8/§10 (updated first, same
+  date: rebranded templates, single-promotional-link strategy, founder-led
+  signature) ✅ draft.py locked constants + validator ✅ draft/integration tests.
+- Follow-up TODOs: none.
+-->
+
+<!--
+Prior version 4.0.0 Sync Impact Report (2026-07-17)
 - Version change: 3.0.0 → 4.0.0 (2026-07-17)
 - Reason: outreach moves to a custom-domain mailbox (anas@omniveer.com on Zoho
   Mail) for deliverability (SPF/DKIM/DMARC). Principle I's "Gmail API only ...
@@ -196,9 +212,10 @@ Every claim in outreach copy **about the prospect's own channels** MUST be
 backed by an open-web signal observed and recorded during research
 (`fb_signal` per PRODUCT.md §7.5). Ad-running is NEVER claimed or implied —
 it is not observable from outside Facebook and the tool never looks inside.
-Describing the **product's own capability** (Nestaro answers a Facebook page
-inbox) is a fact about the product, not the prospect, and is permitted in all
-variants *(amended 2026-07-14, v2.0.0)*. Template selection remains
+Describing the **product's own capability** (Omniveer's Duct Lead Qualifier
+answers a Facebook page inbox) is a fact about the product, not the prospect,
+and is permitted in all variants *(amended 2026-07-14, v2.0.0; product
+renamed from "Nestaro" 2026-07-17, v4.0.1)*. Template selection remains
 mechanical: `fb_signal: strong` → variant that references their page activity;
 `weak`/`none` → variant that frames Facebook as product capability only, with
 no assertion about their usage. When the signal is uncertain, default DOWN,
@@ -278,4 +295,4 @@ verifiably works.
 - **Compliance review**: every plan and PR is checked against Principles I–VII
   before merge; violations block until resolved or the constitution is amended.
 
-**Version**: 4.0.0 | **Ratified**: 2026-07-13 | **Last Amended**: 2026-07-17
+**Version**: 4.0.1 | **Ratified**: 2026-07-13 | **Last Amended**: 2026-07-17

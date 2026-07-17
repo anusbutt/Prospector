@@ -1,4 +1,4 @@
-# Nestaro Lead Qualifier — Features & Value
+# Omniveer Duct Lead Qualifier — Features & Value
 
 An AI agent that answers a local service business's Facebook Messenger inbox, qualifies every lead, books the appointment, and hands a finished, contact-ready lead to the owner — automatically, 24/7.
 
@@ -16,7 +16,7 @@ Local service businesses (duct & dryer-vent cleaning, home services) lose money 
 
 **The result:** paid ad clicks and organic inquiries that never turn into booked jobs.
 
-Nestaro answers instantly, in a human voice, qualifies the lead properly, books a real open slot, and notifies the owner — so no lead is dropped and no owner time is spent until there's a confirmed job on the calendar.
+Duct Lead Qualifier answers instantly, in a human voice, qualifies the lead properly, books a real open slot, and notifies the owner — so no lead is dropped and no owner time is spent until there's a confirmed job on the calendar.
 
 ---
 
@@ -82,4 +82,4 @@ Nestaro answers instantly, in a human voice, qualifies the lead properly, books 
 
 ## The Bottom Line
 
-Nestaro turns a Facebook Page inbox into an always-on booking engine: **every lead gets an instant, human reply, gets properly qualified, and lands on the calendar as a confirmed appointment** — while the owner only steps in when it actually matters.
+Duct Lead Qualifier turns a Facebook Page inbox into an always-on booking engine: **every lead gets an instant, human reply, gets properly qualified, and lands on the calendar as a confirmed appointment** — while the owner only steps in when it actually matters.
