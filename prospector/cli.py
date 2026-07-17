@@ -3,10 +3,12 @@
 Exit codes (run/source): 0 = batch completed (per-company failures allowed);
 1 = pre-flight failure (nothing written); 2 = unexpected mid-run crash.
 
-The `send` command (feature 003, Constitution v3.0.0 Principle I) delivers only
-human-approved notes, dry-run by default. Its exit codes: 0 = completed;
-1 = pre-flight failure; 2 = identity mismatch (wrong account, nothing sent);
-3 = missing/failed OAuth. Per-message send failures are non-fatal (exit 0).
+The `send` command (features 003/004, Constitution v4.0.0 Principle I) delivers
+only human-approved notes through the configured provider (Gmail API or
+authenticated SMTP), dry-run by default. Its exit codes: 0 = completed;
+1 = pre-flight failure (incl. missing/invalid provider or SMTP config);
+2 = identity mismatch (wrong account, nothing sent); 3 = authentication failure
+(OAuth or SMTP login). Per-message send failures are non-fatal (exit 0).
 """
 
 from pathlib import Path
@@ -126,20 +128,26 @@ def send(
     vault: Path = typer.Option(None, "--vault", help="Vault folder (default: Vault/Outreach)"),
     yes: bool = typer.Option(False, "--yes", help="Skip the pre-send confirmation prompt"),
 ):
-    """Send human-approved notes (status: approved) via Gmail. Dry-run by default."""
-    from prospector.gmail import AuthError
-    from prospector.send import IdentityError, authorize_and_verify, run_send
+    """Send human-approved notes via the configured provider (Gmail API or
+    authenticated SMTP). Dry-run by default — no auth, no connection."""
+    from prospector.send import IdentityError, run_send, verified_sender
+    from prospector.transport import AuthError
 
     settings = load_settings()
     target = vault or settings.vault_dir
     if not target.is_dir():
         typer.echo(f"error: vault folder not found: {target}", err=True)
         raise typer.Exit(1)
+    try:
+        settings.require_send()  # provider/identity/SMTP pre-flight; no network
+    except ConfigError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(1)
 
-    creds = None
+    sender = None
     if real:
         try:
-            creds = authorize_and_verify(settings)
+            sender = verified_sender(settings)
         except IdentityError as exc:
             typer.echo(f"error: {exc}", err=True)
             raise typer.Exit(2)
@@ -150,6 +158,7 @@ def send(
             preview = run_send(settings, vault_dir=target, dry_run=True, limit=limit)
             typer.echo(
                 f"About to really send {preview.sent} email(s) from {settings.send_from} "
+                f"via {settings.send_provider} "
                 f"(today's cap {preview.cap_today}, already sent {preview.already_today})."
             )
             if not typer.confirm("Proceed?"):
@@ -157,7 +166,7 @@ def send(
                 raise typer.Exit(0)
 
     try:
-        report = run_send(settings, vault_dir=target, dry_run=not real, limit=limit, creds=creds)
+        report = run_send(settings, vault_dir=target, dry_run=not real, limit=limit, sender=sender)
     except Exception as exc:
         typer.echo(f"unexpected error: {exc}", err=True)
         raise typer.Exit(1)

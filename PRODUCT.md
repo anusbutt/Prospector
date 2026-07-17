@@ -10,13 +10,13 @@ Target lift: move a batch from ~2/20 named to ~10/20 named, auto-dedupe, and cha
 
 ## 2. What it is
 
-A **CLI batch tool** that takes a list of companies and, per company: finds the owner's first name (open web only), grabs one personalization hook, detects channel (email vs Messenger-only) and catches duplicate inboxes, scores name confidence, drafts a paste-ready message in the owner's locked voice, and writes one Obsidian note per company plus a dashboard note. The human reviews the vault and marks a note `status: approved`; an optional **`send` stage** (§11, feature 003) then delivers only approved notes via the Gmail API, under a ramped daily cap, dry-run by default, with an immutable send ledger.
+A **CLI batch tool** that takes a list of companies and, per company: finds the owner's first name (open web only), grabs one personalization hook, detects channel (email vs Messenger-only) and catches duplicate inboxes, scores name confidence, drafts a paste-ready message in the owner's locked voice, and writes one Obsidian note per company plus a dashboard note. The human reviews the vault and marks a note `status: approved`; an optional **`send` stage** (§11, features 003/004) then delivers only approved notes through the configured email provider — the Gmail API or authenticated SMTP (e.g. a Zoho custom-domain mailbox) — under a ramped daily cap, dry-run by default, with an immutable send ledger.
 
 An optional **`source` stage** (§10) builds that input list in the first place: it discovers companies via Google Places across US metros and filters to those showing Meta-ad infrastructure on their own site.
 
 ## 3. Non-goals (do not build)
 
-- **No unguarded / bulk sender.** Sending is limited to the guarded, approval-gated Gmail path defined in Principle I and §11 (feature 003): only `status: approved` notes, only from the Nestaro account, under a ramped daily cap, dry-run by default. Never the operator's personal account; never an unapproved, off-channel, or over-cap send. A general-purpose or transactional-ESP sender is still out of scope.
+- **No unguarded / bulk sender.** Sending is limited to the guarded, approval-gated path defined in Principle I and §11 (features 003/004): only `status: approved` notes, only from the configured dedicated outreach mailbox (Gmail API or authenticated SMTP), under a ramped daily cap, dry-run by default. Never the operator's personal account; never an unapproved, off-channel, or over-cap send. A general-purpose or transactional-ESP sender is still out of scope.
 - **No Facebook API / MCP / scraping.** (See §5.)
 - **No web UI / dashboard app.** Obsidian is the interface.
 - **No agent framework** (no LangChain). Direct single-shot LLM calls.
@@ -174,7 +174,7 @@ Hey! I'm giving 5 duct cleaning companies a free 10-day run of Nestaro, an AI as
 
 ## 11. Approved send (`prospector send`)
 
-**Why:** at real outreach volume (up to ~100/day) sending each drafted note by hand is impractical, and hand-tracking what was sent invites double-sends. This stage delivers **only** notes a human has explicitly approved, under hard guardrails (Constitution v3.0.0, Principle I). The human is still the sole approver; the tool is only the hands.
+**Why:** at real outreach volume (up to ~100/day) sending each drafted note by hand is impractical, and hand-tracking what was sent invites double-sends. This stage delivers **only** notes a human has explicitly approved, under hard guardrails (Constitution v4.0.0, Principle I). The human is still the sole approver; the tool is only the hands.
 
 **Status lifecycle:** the human reviews a draft in Obsidian and sets its frontmatter `status:` to `approved`. `prospector send` then performs the single machine-owned transition `approved → sent` (with a dated `## Log` line). Every other status stays human-owned.
 
@@ -186,13 +186,18 @@ draft / to-send ──(human sets)──▶ approved ──(prospector send --se
 **What it does:**
 
 - **Select** — scan the vault for `status: approved`, email-channel notes with a valid recipient and a `## Draft` subject + body. Anything else is skipped and reported (never guessed).
-- **Guard the account** — send only via the **Gmail API** from the dedicated Nestaro account (`PROSPECTOR_SEND_FROM`, default `nestaroassistant@gmail.com`). The tool resolves the authorized account and **refuses to send** if it is anything else — never the operator's personal account.
+- **Guard the account** — send only through the configured provider (`PROSPECTOR_SEND_PROVIDER`: the **Gmail API** or **authenticated SMTP**, e.g. a Zoho custom-domain mailbox) from the dedicated outreach mailbox (`PROSPECTOR_SEND_FROM` — required; for Omniveer outreach: `anas@omniveer.com`). Before any send the tool resolves the authenticated identity (Gmail: the OAuth account; SMTP: the login username) and **refuses to send** if it does not match `PROSPECTOR_SEND_FROM` — never the operator's personal account, never a spoofed From address.
 - **Cap (ramped)** — a configurable weekly ramp (`PROSPECTOR_SEND_CAPS`, default `15,30,60,100`; last value = week 4+), anchored on the first send recorded in the ledger. Today's allowance = cap − sends already logged today; the excess stay `approved` for a later day.
 - **Pace** — real sends are spaced by a randomized delay (`PROSPECTOR_SEND_DELAY`, default `30–90s`) to mimic human sending and protect deliverability. Dry-run adds no delay.
 - **Dry-run by default** — with no `--send`, nothing is sent, no status changes, no ledger write; the tool previews what it *would* send. Real sends require the explicit `--send` flag.
-- **Ledger** — an append-only `send_ledger.jsonl` (gitignored) records recipient, note slug, timestamp, Gmail message id, and result. It is the authoritative daily count and the double-send guard (a recipient/slug already sent is never sent again). Resumable after interruption.
+- **Ledger** — an append-only `send_ledger.jsonl` (gitignored) records recipient, note slug, timestamp, provider message id (Gmail id or SMTP Message-ID), and result. It is the authoritative daily count and the double-send guard (a recipient/slug already sent is never sent again). Resumable after interruption.
 - **Failure isolation** — a failed send leaves the note `approved`, logs the error, and the run continues; a failure never marks a note `sent`.
 
-**Requirements & limits:** a one-time Google OAuth consent (Desktop client in `secrets/`, gitignored) authorizes the Nestaro account with least-privilege scopes (`gmail.send` + email address for the identity check). A free Gmail account cannot publish SPF/DKIM/DMARC, so warm it up and expect the realistic daily cap to plateau below 100 regardless of the schedule.
+**Providers (feature 004):** sending goes through a provider-neutral transport selected by `PROSPECTOR_SEND_PROVIDER`:
 
-**Non-goals:** no personal-account sending, no non-email channel (no Messenger send), no bulk/unapproved/over-cap send, no transactional-ESP or general-purpose sender, no open/click tracking.
+- **`gmail`** — the original Gmail API path (feature 003, kept for backward compatibility): one-time Google OAuth consent (Desktop client in `secrets/`, gitignored) with least-privilege scopes (`gmail.send` + email address for the identity check). A free Gmail account cannot publish SPF/DKIM/DMARC, so warm it up and expect the realistic daily cap to plateau below 100 regardless of the schedule.
+- **`smtp`** — authenticated SMTP to a custom-domain mailbox (e.g. Zoho Mail for `anas@omniveer.com`): implicit SSL (465) or STARTTLS (587), password from the environment only (never logged, never committed). A custom domain can publish SPF/DKIM/DMARC, which is the deliverability upgrade motivating this provider. The From identity must equal the authenticated SMTP username — arbitrary From spoofing is refused.
+
+Dry-run performs **no** authentication and opens **no** connection under either provider.
+
+**Non-goals:** no personal-account sending, no non-email channel (no Messenger send), no bulk/unapproved/over-cap send, no transactional-ESP or general-purpose sender, no open/click tracking, no From-alias allowlist (a future feature may add one; until then From == authenticated identity, always).

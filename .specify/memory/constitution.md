@@ -1,5 +1,32 @@
 <!--
 Sync Impact Report
+- Version change: 3.0.0 → 4.0.0 (2026-07-17)
+- Reason: outreach moves to a custom-domain mailbox (anas@omniveer.com on Zoho
+  Mail) for deliverability (SPF/DKIM/DMARC). Principle I's "Gmail API only ...
+  no SMTP" channel rule and the hardcoded Nestaro Gmail identity are REDEFINED
+  (MAJOR bump: principle redefinition). Approved by the human 2026-07-17;
+  enables feature 004-provider-transport.
+- Modified principles: I (Human-Approved Sending Only). New rule: sends go
+  through a provider-neutral transport limited to exactly two providers — the
+  Gmail API (unchanged, backward compatible) or authenticated SMTP over
+  SSL/STARTTLS — selected by configuration; the sending identity is the
+  configured dedicated outreach mailbox (`PROSPECTOR_SEND_FROM`, no hardcoded
+  account), verified against the authenticated identity before any send
+  (SMTP: From MUST equal the authenticated username — no From spoofing).
+  Every other guardrail is unchanged: approved-only, dry-run default, ramped
+  cap, immutable ledger, never auto-approve, never off-channel (no Messenger,
+  no browser automation), never past the cap, never the personal account.
+- Modified principles: VI (Smallest Viable Build) — "guarded, approval-gated
+  Gmail sender" wording generalized to "guarded, approval-gated email sender
+  (Gmail API or authenticated SMTP)".
+- Added sections: none. Removed sections: none.
+- Templates requiring updates: ✅ PRODUCT.md §2/§3/§11 (updated first, same
+  date) ✅ README guarantee #1 + config/sending docs ✅ .env.example.
+- Follow-up TODOs: none.
+-->
+
+<!--
+Prior version 3.0.0 Sync Impact Report (2026-07-15)
 - Version change: 2.0.0 → 3.0.0 (2026-07-15)
 - Reason: Nestaro outreach now requires automated sending of human-approved
   drafts at controlled volume (100/day goal, ramped). Principle I's absolute
@@ -92,24 +119,38 @@ a change that violates one MUST be rejected or the constitution amended first.
 The tool drafts by default and MUST NOT send anything a human has not explicitly
 marked `status: approved` in the vault. When it sends, it MUST:
 
-- send **only via the Gmail API**, from the designated Nestaro outreach account
-  (`nestaroassistant@gmail.com`) — **never** the operator's personal account and
-  never any other channel (no SMTP, no browser automation, no Messenger send);
+- send **only email**, through exactly one of two configured providers — the
+  **Gmail API** or **authenticated SMTP** (SSL or STARTTLS, e.g. a Zoho
+  custom-domain mailbox) — and never any other channel (no browser automation,
+  no Messenger send);
+- send **only from the configured dedicated outreach mailbox**
+  (`PROSPECTOR_SEND_FROM`, required — no hardcoded default) — **never** the
+  operator's personal account. Before any send the authenticated identity
+  (Gmail: the OAuth account; SMTP: the login username) MUST be verified to
+  match the configured sender, case-insensitively; on mismatch the run aborts
+  with nothing sent. SMTP MUST require authentication, and the From address
+  MUST equal the authenticated username — arbitrary From spoofing is refused;
 - **never exceed the configured daily cap** (a ramped schedule, not a flat
   number), enforced against the send ledger;
 - **default to dry-run**: a real send requires an explicit flag; absent it, the
-  tool only reports what it *would* send;
+  tool only reports what it *would* send — and dry-run MUST NOT authenticate,
+  open a network connection, or make any external request;
 - **append every send to an immutable ledger** (recipient, note, timestamp,
   message id, result) — the ledger is the source of truth for the daily count
   and the audit trail;
 - **never auto-approve, never bulk-send past the cap**, and never send a note
-  whose `status` is anything other than `approved`.
+  whose `status` is anything other than `approved`;
+- **never log, print, persist, or commit** the SMTP password, OAuth tokens, or
+  any other sending credential.
 
-*Rationale: automating human-approved sends at controlled volume is now a
-product requirement (Nestaro outreach at scale). The guardrails keep the human
-as the sole approver, protect the sending account's reputation via a ramped cap,
-and make double-sends impossible via the ledger — while still forbidding the
-personal account and any unapproved or off-channel send.*
+*Rationale: automating human-approved sends at controlled volume is a product
+requirement, and deliverability at that volume requires a custom-domain mailbox
+with SPF/DKIM/DMARC (amended 2026-07-17, v4.0.0: authenticated SMTP joins the
+Gmail API as a sanctioned transport for the Omniveer mailbox). The guardrails
+keep the human as the sole approver, bind the tool to one verified dedicated
+identity, protect the sending account's reputation via a ramped cap, and make
+double-sends impossible via the ledger — while still forbidding the personal
+account and any unapproved or off-channel send.*
 
 ### II. Open Web Only — Facebook Is Never Accessed
 
@@ -170,7 +211,8 @@ observed; it does not forbid saying what the product we're offering does.*
 
 Scope is bounded by PRODUCT.md; features not specified there MUST NOT be
 built (explicitly excluded: CRM features, web UI, agent frameworks; a guarded,
-approval-gated Gmail sender is IN scope per Principle I). LLM usage is
+approval-gated email sender — Gmail API or authenticated SMTP — is IN scope per
+Principle I). LLM usage is
 single-shot prompt-per-company via OpenRouter with
 direct API calls — no LangChain or other agent/orchestration framework.
 External services are called via direct HTTP/SDK calls. Prefer the smallest
@@ -236,4 +278,4 @@ verifiably works.
 - **Compliance review**: every plan and PR is checked against Principles I–VII
   before merge; violations block until resolved or the constitution is amended.
 
-**Version**: 3.0.0 | **Ratified**: 2026-07-13 | **Last Amended**: 2026-07-15
+**Version**: 4.0.0 | **Ratified**: 2026-07-13 | **Last Amended**: 2026-07-17

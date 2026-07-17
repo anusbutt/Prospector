@@ -23,7 +23,7 @@ These are hard constraints enforced in code and tests, not aspirations
 
 | # | Guarantee | How it's enforced |
 |---|-----------|-------------------|
-| 1 | **Sends only what a human approved** | The pipeline drafts; `prospector send` delivers **only** notes marked `status: approved`, dry-run by default (real sends need `--send`), Gmail API only from the dedicated Nestaro account (never a personal account), under a ramped daily cap, with an append-only ledger that prevents double-sends. It never auto-approves, never sends off-channel, and never exceeds the cap. |
+| 1 | **Sends only what a human approved** | The pipeline drafts; `prospector send` delivers **only** notes marked `status: approved`, dry-run by default (real sends need `--send`), exclusively from the configured dedicated outreach mailbox via one of two guarded transports — the Gmail API or authenticated SMTP (e.g. Zoho) — never a personal account and never a From address that differs from the authenticated identity. All under a ramped daily cap, with an append-only ledger that prevents double-sends. It never auto-approves, never sends off-channel, and never exceeds the cap. |
 | 2 | **Never touches Facebook** | Every outbound request passes through one HTTP choke point that raises on `facebook.com`, `fb.com`, `fb.me`, `fbcdn.net`, and `messenger.com` before any network activity. A `facebook_url` input is stored as a signal and never fetched. |
 | 3 | **Never fabricates a name** | A real first name appears in a draft only at high confidence, and only when it traces to a recorded source (a page URL and excerpt). A validator rejects any unsourced name, even if the LLM produces one. |
 | 4 | **Never claims what it can't observe** | Ad-running is never claimed or implied. Statements about the *prospect's own* Facebook activity appear only when observed open-web signals support them (uncertain signals always rank *down*); describing the offered product's Facebook capability is a product fact, not a claim about the prospect. |
@@ -41,10 +41,10 @@ ingest ──► dedupe & bucket ──► resolve ──► fetch ──► ext
                                               blocked)   FB signals) fb_signal) 1 LLM call) dashboard)
       │
       ▼
-YOU review in Obsidian ──► set status: approved ──► prospector send ──► Gmail
-   (fix / approve / reject)      (your green light)     (dry-run default,   (from the
-                                                         cap + pace +        Nestaro
-                                                         ledger)             account)
+YOU review in Obsidian ──► set status: approved ──► prospector send ──► Gmail API / SMTP
+   (fix / approve / reject)      (your green light)     (dry-run default,   (from the dedicated
+                                                         cap + pace +        outreach mailbox,
+                                                         ledger)             e.g. Zoho)
 ```
 
 `prospector source` (optional) builds the input list; `prospector send` (optional)
@@ -121,7 +121,13 @@ cp .env.example .env   # then add your keys
 | `OPENROUTER_MODEL` | No | Defaults to `anthropic/claude-sonnet-4.5` |
 | `GOOGLE_PLACES_API_KEY` | For `source` | `source` exits pre-flight (no fallback discovery); `run`'s website/city resolution falls back to DuckDuckGo only |
 | `HUNTER_API_KEY` | No | Email-name enrichment skipped (capped at medium confidence when present) |
-| `PROSPECTOR_SEND_FROM` | For `send` | Defaults to `nestaroassistant@gmail.com`; the tool refuses to send from any other account |
+| `PROSPECTOR_SEND_PROVIDER` | No | Send transport: `gmail` (default) or `smtp` |
+| `PROSPECTOR_SEND_FROM` | For `send` | Pre-flight error — set it to the dedicated outreach mailbox (e.g. `anas@omniveer.com`); the tool refuses to send from any other identity |
+| `PROSPECTOR_SEND_NAME` | No | From display name (`Anas from Omniveer <anas@omniveer.com>`); bare address when unset |
+| `PROSPECTOR_REPLY_TO` | No | `Reply-To` header omitted when unset |
+| `PROSPECTOR_SMTP_HOST` / `_USERNAME` / `_PASSWORD` | For `smtp` provider | Pre-flight error naming the missing variable (values never echoed) |
+| `PROSPECTOR_SMTP_SECURITY` | No | `ssl` (implicit TLS, default) or `starttls` |
+| `PROSPECTOR_SMTP_PORT` | No | Defaults to 465 (`ssl`) / 587 (`starttls`) |
 | `PROSPECTOR_SEND_CAPS` | No | Weekly daily-cap ramp; defaults to `15,30,60,100` (last value applies to week 4+) |
 | `PROSPECTOR_SEND_DELAY` | No | Randomized seconds between real sends; defaults to `30,90` |
 
@@ -260,23 +266,27 @@ Dataview, everything still works as plain markdown.
 ## Sending (optional): deliver approved drafts
 
 `prospector send` delivers the notes you have marked `status: approved` — and
-only those — as plain emails from a dedicated account. It is **dry-run by
-default**: with no flag it previews exactly what it would send and touches
-nothing. A real send requires `--send`.
+only those — as plain emails from a dedicated outreach mailbox, through one of
+two transports selected by `PROSPECTOR_SEND_PROVIDER`: the **Gmail API**
+(default, backward compatible) or **authenticated SMTP** (e.g. a Zoho
+custom-domain mailbox). It is **dry-run by default**: with no flag it previews
+exactly what it would send and touches nothing — no authentication, no
+connection, no external request. A real send requires `--send`.
 
 ```bash
 # after approving notes in Obsidian (status: approved):
-prospector send                     # DRY-RUN preview (sends nothing, changes nothing)
-prospector send --send              # actually send (first run does a one-time Google OAuth)
+prospector send                     # DRY-RUN preview (sends nothing, connects to nothing)
+prospector send --send              # actually send (gmail: first run does a one-time OAuth)
 prospector send --send --limit 5    # send at most 5 this run (still capped)
 prospector send --send --vault ~/Obsidian/Outreach
 ```
 
-Each real send, in order: verifies the authorized account is `PROSPECTOR_SEND_FROM`
-(and **refuses** otherwise — never a personal account), checks today's remaining
-allowance against the ramped cap, skips anyone already in the ledger, sends via the
-Gmail API, records a ledger line, flips the note to `status: sent`, then waits a
-randomized 30–90s before the next one.
+Each real send, in order: verifies the *authenticated* identity is
+`PROSPECTOR_SEND_FROM` (and **refuses** otherwise — never a personal account,
+never a spoofed From), checks today's remaining allowance against the ramped
+cap, skips anyone already in the ledger, delivers via the configured provider,
+records a ledger line with the provider's message id, flips the note to
+`status: sent`, then waits a randomized 30–90s before the next one.
 
 - **The ledger** (`send_ledger.jsonl`, append-only, gitignored) is the source of
   truth for the daily count and for **double-send prevention** — a recipient or
@@ -288,14 +298,40 @@ randomized 30–90s before the next one.
   logs the reason, and the run continues — nothing is silently dropped or double-sent.
 
 Exit codes for `send`: `0` completed (per-message failures are reported, not fatal),
-`1` pre-flight failure, `2` wrong account (nothing sent), `3` missing/failed OAuth.
+`1` pre-flight failure (including missing/invalid provider or SMTP configuration),
+`2` wrong account (nothing sent), `3` authentication failure (OAuth or SMTP login).
 
-**One-time setup:** a Google Cloud project with the Gmail API enabled and a Desktop
-OAuth client; put its client-secret JSON at `secrets/gmail_client_secret.json`. The
-first `--send` opens a browser consent (sign in as the Nestaro account); the token
-is then saved to `secrets/gmail_token.json` and reused. A free Gmail can't publish
-SPF/DKIM/DMARC, so warm the account up and expect the realistic cap to plateau below
-100 — deliverability, not the code, is the limiting factor.
+### SMTP setup (e.g. Zoho custom domain)
+
+A custom-domain mailbox can publish SPF/DKIM/DMARC — the deliverability upgrade
+a free Gmail account can't get. In `.env` (gitignored; the password is never
+logged and never committed):
+
+```bash
+PROSPECTOR_SEND_PROVIDER=smtp
+PROSPECTOR_SMTP_HOST=smtp.zoho.com
+PROSPECTOR_SMTP_SECURITY=ssl              # implicit TLS on 465 (or starttls on 587)
+PROSPECTOR_SMTP_USERNAME=anas@omniveer.com
+PROSPECTOR_SMTP_PASSWORD=<app-specific password>
+PROSPECTOR_SEND_FROM=anas@omniveer.com    # must equal the SMTP username (no spoofing)
+PROSPECTOR_SEND_NAME=Anas from Omniveer   # From: Anas from Omniveer <anas@omniveer.com>
+```
+
+Authentication is mandatory, TLS certificates are verified, and each message
+carries proper `From`/`Reply-To`/`Date`/`Message-ID` headers (the Message-ID is
+stored in the ledger). See
+[`specs/004-provider-transport/quickstart.md`](specs/004-provider-transport/quickstart.md)
+for the full walkthrough.
+
+### Gmail setup (default provider)
+
+A Google Cloud project with the Gmail API enabled and a Desktop OAuth client;
+put its client-secret JSON at `secrets/gmail_client_secret.json`. The first
+`--send` opens a browser consent (sign in as the dedicated outreach account —
+`PROSPECTOR_SEND_FROM` must match it); the token is then saved to
+`secrets/gmail_token.json` and reused. A free Gmail can't publish
+SPF/DKIM/DMARC, so warm the account up and expect the realistic cap to plateau
+below 100 — deliverability, not the code, is the limiting factor.
 
 ## Design notes
 
