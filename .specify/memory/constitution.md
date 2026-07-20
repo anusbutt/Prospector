@@ -31,10 +31,12 @@ Sync Impact Report
 - Templates requiring updates: ✅ .specify/templates/plan-template.md
   (Constitution Check gates verified compatible) ✅ spec-template.md (no change
   required) ✅ tasks-template.md (no change required)
-  ⚠ PRODUCT.md §8 drafting language (pending 006 spec)
-  ⚠ README guarantees #3/#4 wording (pending 006 implementation)
-- Follow-up TODOs: reconcile PRODUCT.md §8 and the README guarantee table
-  during 006-agentic-drafting, before implementation is marked complete.
+  ✅ PRODUCT.md §8 rewritten as "Message generation" (2026-07-20): citation-based
+  honesty, instruction files, locked template retained as documented fallback
+  ✅ README guarantees reworked (2026-07-20): #3 name honesty restated as
+  structural (code owns the greeting), #4 added for evidence citation, #5/#6
+  renumbered; the drafting step in "How it works" rewritten
+- Follow-up TODOs: none.
 -->
 
 <!--

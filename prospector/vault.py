@@ -25,6 +25,10 @@ FRONTMATTER_KEYS = (
     "fb_signal",
     "duplicate_of",
     "needs_review",
+    # 006: appended (not inserted) so existing notes keep their key order and
+    # the first re-run produces content diffs, not 130 reorderings.
+    "draft_source",
+    "outcome",
     "tags",
 )
 
@@ -93,6 +97,7 @@ def render_note(
     *,
     status: str = "to-send",
     log_markdown: str = "-",
+    draft: Draft | None = None,
 ) -> str:
     company = prospect.company
     values = {
@@ -109,6 +114,10 @@ def render_note(
         "fb_signal": prospect.fb_signal.value,
         "duplicate_of": company.duplicate_of,
         "needs_review": bool(prospect.needs_review or company.needs_review),
+        # Empty when nothing was drafted this run (frozen, --no-llm).
+        "draft_source": draft.source if draft is not None else None,
+        # Human-owned: written empty on creation and never machine-set again.
+        "outcome": None,
         "tags": None,  # rendered specially below
     }
     lines = ["---"]
@@ -388,6 +397,28 @@ WHERE channel = "messenger"
 TABLE rows.company AS Companies
 FROM #prospector
 GROUP BY status
+```
+
+## Draft source
+
+```dataview
+TABLE rows.company AS Companies
+FROM #prospector
+GROUP BY draft_source
+```
+
+## Outcomes by draft source
+
+> Fill in `outcome:` by hand when a prospect replies (`replied`, `interested`,
+> `bounced`, `no`). It is yours: the tool writes it empty once and never
+> touches it again. This table is the only way to tell whether agent-written
+> copy beat the template it replaced.
+
+```dataview
+TABLE rows.company AS Companies
+FROM #prospector
+WHERE outcome
+GROUP BY draft_source + " / " + outcome
 ```
 """
 

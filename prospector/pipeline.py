@@ -6,6 +6,7 @@ every input row yields a note (SC-002).
 import sys
 from pathlib import Path
 
+from prospector import agent_draft
 from prospector import draft as drafting
 from prospector import enrich
 from prospector import extract as extracting
@@ -41,8 +42,12 @@ def run_batch(
     no_llm: bool = False,
     verbose: bool = False,
     fetcher: Fetcher | None = None,
+    instructions=None,
 ) -> RunSummary:
-    """Process a batch. Raises IngestError only for pre-flight problems."""
+    """Process a batch. Raises IngestError only for pre-flight problems.
+
+    `instructions` is the pre-flighted InstructionSet for agent drafting; when
+    None the drafting path falls back to the locked template (FR-315)."""
     vault_dir = Path(vault_dir) if vault_dir else settings.vault_dir
     fetcher = fetcher or Fetcher()
 
@@ -66,9 +71,16 @@ def run_batch(
         frozen = vault.is_frozen(vault.read_status(vault_dir, company.slug))
         try:
             prospect, draft = _process_company(
-                company, settings, fetcher, no_llm=no_llm, verbose=verbose, frozen=frozen
+                company,
+                settings,
+                fetcher,
+                no_llm=no_llm,
+                verbose=verbose,
+                frozen=frozen,
+                instructions=instructions,
             )
             outcome, detail = _write(prospect, draft, vault_dir, no_llm=no_llm, frozen=frozen)
+            _count_drafting_path(summary, company.slug, draft)
             summary.processed += 1
         except Exception as exc:  # per-company isolation (FR-021)
             _log(f"error: {company.slug}: {exc}")
@@ -92,6 +104,7 @@ def _process_company(
     no_llm: bool,
     verbose: bool,
     frozen: bool = False,
+    instructions=None,
 ) -> tuple[Prospect, Draft | None]:
     research = _research(company, settings, fetcher, verbose=verbose)
     prospect = _score(company, research, settings)
@@ -103,12 +116,13 @@ def _process_company(
         # is made at all. ## Research still refreshes from the work above.
         return prospect, draft
     if company.channel is Channel.EMAIL:
-        try:
-            draft = drafting.build_email_draft(prospect, settings)
-        except drafting.DraftError as exc:
-            research.failures.append(str(exc))
-            prospect.needs_review = True
+        # 006: agent path with automatic template fallback. Never raises, so
+        # the batch cannot be aborted by a drafting failure (FR-318).
+        draft = agent_draft.draft_email(prospect, settings, instructions)
+        if draft.validation_errors:
+            research.failures.extend(draft.validation_errors)
     else:
+        # FR-308: messenger DMs stay fully deterministic — no model call.
         draft = drafting.build_messenger_draft(prospect)
     if draft is not None and not draft.validated:
         prospect.needs_review = True
@@ -211,7 +225,7 @@ def _write(
 ) -> tuple[str, str]:
     draft_md = vault.draft_markdown_for(draft, prospect, no_llm=no_llm and prospect.company.channel is Channel.EMAIL)
     research_md = vault.build_research_markdown(prospect)
-    note = vault.render_note(prospect, draft_md, research_md)
+    note = vault.render_note(prospect, draft_md, research_md, draft=draft)
     result = vault.upsert_note(vault_dir, prospect.company.slug, note, freeze_draft=frozen)
     if frozen:
         detail = f"draft frozen (approved/sent), research refreshed, note {result}"
@@ -222,6 +236,29 @@ def _write(
     else:
         detail = f"no draft, note {result}"
     return "ok", detail
+
+
+def _count_drafting_path(summary: RunSummary, slug: str, draft: Draft | None) -> None:
+    """Drafting-path visibility (FR-320).
+
+    Only email-channel drafts have a path: messenger DMs are deterministic and
+    frozen/--no-llm companies are not drafted at all, so neither is counted.
+    The fallback REASON is recorded, not just the count — a silent 40% fallback
+    rate would otherwise look like slightly boring copy rather than a break."""
+    if draft is None or draft.source not in ("agent", "template"):
+        return
+    if draft.model == "deterministic":  # messenger DM
+        return
+    if draft.source == "agent":
+        summary.drafted_agent += 1
+        return
+    summary.drafted_template += 1
+    reason = next(
+        (e for e in draft.validation_errors if e.startswith("agent fallback: ")),
+        None,
+    )
+    if reason:
+        summary.fallback_reasons.append((slug, reason[len("agent fallback: "):]))
 
 
 def _count(summary: RunSummary, prospect: Prospect) -> None:

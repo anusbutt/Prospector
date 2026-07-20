@@ -108,9 +108,31 @@ The signal is researched and recorded in frontmatter for review (and remains ava
 
 Honesty rule mirrors §7: when unsure, **default down** (`weak`/`none`), never up. *(Amended 2026-07-14, constitution v2.0.0: the offered product is a Facebook-Messenger agent; the signal gates claims about the prospect's usage, not product-fact mentions. Ad-running is still never claimed at any level. Rebranded 2026-07-17: the product is Omniveer's **Duct Lead Qualifier**, formerly "Nestaro"; the rule is unchanged.)*
 
-## 8. Locked message templates
+## 8. Message generation
 
-Model fills bracketed slots only. Voice: short, human, practitioner. No hashtags. No AI-sounding language. No em-dash pile-ups.
+*(revised 2026-07-20, feature 006 — supersedes "locked message templates")*
+
+The model **writes the email body**, steered by four versioned markdown files in
+`prospector/agent/` (`IDENTITY.md`, `OFFER.md`, `CONSTRAINTS.md`,
+`skills/write-cold-email.md`). These are content, not code: editing them changes
+the copy with no code change. Voice: short, human, practitioner. No hashtags. No
+AI-sounding language. No em-dash pile-ups.
+
+**Honesty is enforced by citation, not by locked prose.** The model returns a
+subject and 3-6 blocks, each declaring which recorded evidence supports it. A
+deterministic validator (never another model) resolves every citation against
+records actually captured for that company. Offer, product, and sender facts
+cite the reserved id `offer` - and a block citing only `offer` may not mention
+the company name, city, owner name, or hook, which is what stops a prospect
+claim being laundered through the offer.
+
+The **greeting and signature are assembled in code**, never written by the
+model, so a fabricated name has no channel to enter through.
+
+**The locked template below is retained as the automatic fallback.** Any model
+failure, malformed response, or validation rejection falls back to it, the note
+records `draft_source: template`, and the run summary reports why. The template
+path is unchanged and independently tested; it is the honesty floor.
 
 The offer *(rebranded 2026-07-17)*: **Duct Lead Qualifier** by **Omniveer** (`lead_qualifier_feature.md`, https://www.omniveer.com/duct-lead-qualifier) — free 10-day run for 5 duct-cleaning companies, set up entirely by Anas, Founder at Omniveer.
 
@@ -118,7 +140,7 @@ The offer *(rebranded 2026-07-17)*: **Duct Lead Qualifier** by **Omniveer** (`le
 
 **Variant selection *(copy revision 2026-07-17)*:** email channel → the single **channel-neutral email template** below (both `fb_signal` levels; the copy makes no claims about the prospect's channels, so the §7.5 gate is trivially satisfied — the signal is still researched and recorded). Messenger bucket → Messenger DM.
 
-### Email — channel-neutral (all `fb_signal` levels)
+### Fallback email template — channel-neutral (all `fb_signal` levels)
 ```
 Subject: Free 10-day pilot for [Company Name]
 
@@ -141,7 +163,7 @@ The greeting still follows §7's name-confidence rules ("[Company] team" below h
 confidence). The "book a demo through the page" close refers to the product page
 already linked — it adds no second URL (link strategy above holds: one link).
 
-### Messenger DM (messenger bucket)
+### Messenger DM (messenger bucket) - fully deterministic, no model call
 ```
 Hey! I'm giving 5 duct cleaning companies a free 10-day run of Duct Lead Qualifier, an AI assistant that answers your page messages in seconds, day or night. It checks customers are real[, around [city]], quotes your real prices, and books them into open slots on your calendar. You just get the finished lead. I set it all up for you. Want one of the 5 spots? (See it working: https://www.omniveer.com/duct-lead-qualifier)
 ```

@@ -43,9 +43,13 @@ def run(
     from prospector.pipeline import run_batch  # deferred: keeps --help fast
 
     settings = load_settings()
+    instructions = None
     try:
         if not no_llm:
             settings.require_llm()
+            # FR-323: a missing or oversized instruction file stops the run
+            # before any company is processed and before anything is written.
+            instructions = settings.require_instructions()
         if not input.is_file():
             raise IngestError(f"input file not found: {input}")
         summary = run_batch(
@@ -56,6 +60,7 @@ def run(
             only=only,
             no_llm=no_llm,
             verbose=verbose,
+            instructions=instructions,
         )
     except (ConfigError, IngestError) as exc:
         typer.echo(f"error: {exc}", err=True)
@@ -222,6 +227,16 @@ def _print_summary(summary: RunSummary) -> None:
     typer.echo(
         f"  messenger: {summary.messenger}   duplicates: {summary.duplicates}   needs review: {summary.needs_review}"
     )
+    typer.echo(
+        f"  drafted by agent: {summary.drafted_agent}   by template: {summary.drafted_template}"
+    )
+    if summary.fallback_reasons:
+        # FR-320: a degraded drafting path must be visible within one batch,
+        # not discovered later as "the copy got boring".
+        typer.echo("\n  fallbacks:")
+        width = max(len(slug) for slug, _ in summary.fallback_reasons)
+        for slug, reason in summary.fallback_reasons:
+            typer.echo(f"    {slug.ljust(width)}  {reason}")
     if summary.per_company:
         typer.echo("")
         width = max(len(slug) for slug, _, _ in summary.per_company)

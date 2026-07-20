@@ -59,6 +59,17 @@ class Settings:
                 "or run with --no-llm to skip drafting."
             )
 
+    def require_instructions(self):
+        """Pre-flight the drafting instruction files (006, FR-323/FR-325).
+
+        Loads once per run and returns the InstructionSet, so `run` fails
+        before touching the network or writing a note when a file is missing
+        or the assembled context is oversized. Imported lazily: `--help` and
+        `--no-llm` should not pay for it."""
+        from prospector.instructions import load_instructions
+
+        return load_instructions()
+
     def require_places(self) -> None:
         if not self.places_key:
             raise ConfigError(

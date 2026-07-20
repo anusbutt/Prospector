@@ -25,9 +25,10 @@ These are hard constraints enforced in code and tests, not aspirations
 |---|-----------|-------------------|
 | 1 | **Sends only what a human approved** | The pipeline drafts; `prospector send` delivers **only** notes marked `status: approved`, dry-run by default (real sends need `--send`), exclusively from the configured dedicated outreach mailbox via one of two guarded transports — the Gmail API or authenticated SMTP (e.g. Zoho) — never a personal account and never a From address that differs from the authenticated identity. All under a ramped daily cap, with an append-only ledger that prevents double-sends. It never auto-approves, never sends off-channel, and never exceeds the cap. |
 | 2 | **Never touches Facebook** | Every outbound request passes through one HTTP choke point that raises on `facebook.com`, `fb.com`, `fb.me`, `fbcdn.net`, and `messenger.com` before any network activity. A `facebook_url` input is stored as a signal and never fetched. |
-| 3 | **Never fabricates a name** | A real first name appears in a draft only at high confidence, and only when it traces to a recorded source (a page URL and excerpt). A validator rejects any unsourced name, even if the LLM produces one. |
-| 4 | **Never claims what it can't observe** | Ad-running is never claimed or implied. Statements about the *prospect's own* Facebook activity appear only when observed open-web signals support them (uncertain signals always rank *down*); describing the offered product's Facebook capability is a product fact, not a claim about the prospect. |
-| 5 | **No web UI** | The Obsidian vault *is* the interface. |
+| 3 | **Never fabricates a name** | A real first name appears in a draft only at high confidence, and only when it traces to a recorded source (a page URL and excerpt). The model is never even asked for the name: the greeting is assembled in code from the scored evidence, so a fabricated name has no way in. |
+| 4 | **Every claim about the prospect cites its source** | The model writes the prose, but each paragraph must name the research record it rests on, and a deterministic validator resolves every citation against records actually captured for *that* company. Uncited copy, or a citation that doesn't resolve, is rejected and the locked template answers instead. Product and offer facts cite a reserved `offer` id — and a block citing only `offer` may not mention the prospect, which closes the obvious loophole. |
+| 5 | **Never claims what it can't observe** | Ad-running is never claimed or implied. Statements about the *prospect's own* Facebook activity appear only when observed open-web signals support them and the draft cites them (uncertain signals always rank *down*); describing the offered product's Facebook capability is a product fact, not a claim about the prospect. |
+| 6 | **No web UI** | The Obsidian vault *is* the interface. |
 
 ## How it works
 
@@ -67,11 +68,21 @@ delivers the approved drafts. The core `run` is everything in between.
 6. **Score** — name confidence and channel fit (see tables below). All scoring
    is plain, unit-tested Python. The LLM never makes a trust decision.
 7. **Draft** — one LLM call per company (OpenRouter, direct HTTP, no agent
-   framework). The model returns *slot values only* as strict JSON; the locked
-   template prose is assembled in code and cannot be paraphrased. A validator
-   then rejects unfilled slots, altered template text, unsourced names,
-   Facebook mentions without signal, and ad-running vocabulary. Messenger DMs
-   are fully deterministic — no LLM call at all.
+   framework, no tool use). The model is steered by four versioned markdown
+   files in `prospector/agent/` — who the sender is, what the offer is, the
+   hard rules, and how to write a cold email — and receives *only* the
+   extracted evidence records, never raw HTML. It returns a subject plus 3–6
+   prose blocks, **each declaring which evidence records support it**. Code
+   assembles the greeting (from the scored name, never the model), the blocks,
+   and the signature. A deterministic validator then resolves every citation
+   against records captured for that company and applies the honesty checks:
+   uncited claims, unresolvable citations, prospect facts smuggled into
+   offer-only blocks, ad-running vocabulary, a second link, and unsourced
+   names are all rejected. **Any rejection falls back to the locked template**,
+   which is unchanged and independently tested — so every company still gets an
+   honest draft. The note records `draft_source: agent|template`, and the run
+   summary reports the fallback rate so a broken drafting path is visible in
+   one batch. Messenger DMs stay fully deterministic — no LLM call at all.
 8. **Write vault** — one note per company plus a `_Dashboard.md` of Dataview
    queries. Re-runs are byte-idempotent and merge by section ownership: your
    `status` edits, `## Log` entries, and any sections you add are never
