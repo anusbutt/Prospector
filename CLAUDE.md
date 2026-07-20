@@ -216,6 +216,8 @@ See `.specify/memory/constitution.md` for code quality, testing, performance, se
 - Filesystem only — output is a plain CSV (not a merged store; the vault (002-company-sourcing)
 - Python 3.11+ (unchanged) + Typer (CLI), httpx (Gmail REST send — reuses existing dep), (003-approved-send)
 - Filesystem only — Obsidian vault notes (existing) + one append-only JSONL send (003-approved-send)
+- Python 3.11+ (unchanged) + existing only — httpx (OpenRouter call), Typer (CLI (006-agentic-drafting)
+- Filesystem only — the Obsidian vault remains the datastore; two (006-agentic-drafting)
 
 ## Recent Changes
 - 001-prospector-cli: Added Python 3.11+ + Typer (CLI), httpx (HTTP), selectolax (HTML parsing),

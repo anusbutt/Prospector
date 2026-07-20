@@ -1,5 +1,44 @@
 <!--
 Sync Impact Report
+- Version change: 4.0.1 → 5.0.0 (2026-07-20)
+- Reason: drafting moves from locked-template slot-filling to agent-written
+  personalized prose, constrained by versioned markdown instruction/skill files,
+  with the locked template retained as an automatic fallback. Principles IV and
+  V were previously enforced STRUCTURALLY — the model could not write prose, so
+  it could not lie. That mechanism is REDEFINED as evidence-citation validation
+  (MAJOR bump: enforcement redefinition). Approved by the human 2026-07-20;
+  enables feature 006-agentic-drafting.
+- Modified principles:
+  - I (Human-Approved Sending Only) — CLARIFIED, nothing relaxed: adds the
+    explicit rule that outreach copy is generated at `run` time only and is
+    immutable after approval; the send path MUST NOT generate or alter copy.
+  - IV (Name Honesty → Evidence-Bound Copy — Never Fabricate) — REDEFINED:
+    scope widens from names to every claim about the prospect; each such claim
+    MUST cite a recorded Evidence id, deterministically validated; an
+    uncitable or unvalidated draft falls back to the locked template. The
+    name-confidence tiers themselves are unchanged.
+  - V (Channel Honesty) — REDEFINED enforcement: mechanical template-variant
+    selection is replaced by per-claim evidence citation. The rule itself
+    (prospect-usage claims need observed signals; product facts permitted;
+    ad-running never claimed) is unchanged.
+  - VI (Smallest Viable Build) — REDEFINED: "single-shot prompt-per-company"
+    widens to rich-instruction single-call drafting from versioned markdown
+    files. Agent/orchestration frameworks and autonomous tool-using loops
+    remain excluded; the drafting model MUST have no tools and no network.
+- Added sections: none. Removed sections: none.
+- Modified constraints: "Templates are locked" is now scoped to the fallback
+  path; a new constraint governs the instruction/skill files.
+- Templates requiring updates: ✅ .specify/templates/plan-template.md
+  (Constitution Check gates verified compatible) ✅ spec-template.md (no change
+  required) ✅ tasks-template.md (no change required)
+  ⚠ PRODUCT.md §8 drafting language (pending 006 spec)
+  ⚠ README guarantees #3/#4 wording (pending 006 implementation)
+- Follow-up TODOs: reconcile PRODUCT.md §8 and the README guarantee table
+  during 006-agentic-drafting, before implementation is marked complete.
+-->
+
+<!--
+Prior version 4.0.1 Sync Impact Report (2026-07-17)
 - Version change: 4.0.0 → 4.0.1 (2026-07-17)
 - Reason: the offered product is rebranded — "Nestaro" becomes Omniveer's
   "Duct Lead Qualifier" (https://www.omniveer.com/duct-lead-qualifier).
@@ -146,6 +185,11 @@ marked `status: approved` in the vault. When it sends, it MUST:
   match the configured sender, case-insensitively; on mismatch the run aborts
   with nothing sent. SMTP MUST require authentication, and the From address
   MUST equal the authenticated username — arbitrary From spoofing is refused;
+- **send exactly the words the human approved**: outreach copy is generated at
+  `run` time and written into the note. The send path MUST NOT generate,
+  rewrite, re-request, complete, or otherwise alter subject or body text — it
+  reads what is in the note and delivers it verbatim. No LLM call may occur on
+  the send path *(added 2026-07-20, v5.0.0)*;
 - **never exceed the configured daily cap** (a ramped schedule, not a flat
   number), enforced against the send ledger;
 - **default to dry-run**: a real send requires an explicit flag; absent it, the
@@ -165,8 +209,10 @@ with SPF/DKIM/DMARC (amended 2026-07-17, v4.0.0: authenticated SMTP joins the
 Gmail API as a sanctioned transport for the Omniveer mailbox). The guardrails
 keep the human as the sole approver, bind the tool to one verified dedicated
 identity, protect the sending account's reputation via a ramped cap, and make
-double-sends impossible via the ledger — while still forbidding the personal
-account and any unapproved or off-channel send.*
+double-sends impossible via the ledger. The draft-time-only rule (v5.0.0) is
+what keeps "human-approved" meaningful once copy is model-written: approval
+attaches to specific words, so generating copy after approval would deliver
+something no human ever read.*
 
 ### II. Open Web Only — Facebook Is Never Accessed
 
@@ -194,50 +240,95 @@ merges frontmatter updates without clobbering human edits to `## Log` or
 *Rationale: Obsidian already provides review, search, and pipeline views for
 free; any UI is duplicated effort outside the product's job.*
 
-### IV. Name Honesty — Never Fabricate
+### IV. Evidence-Bound Copy — Never Fabricate
 
-The tool MUST NOT fabricate a name, email address, or personalization hook.
-A real first name is used in a draft only at `high` confidence as defined in
-PRODUCT.md §7 (name from `/about`/`/team`, explicit owner text, or unambiguous
-email pattern). At `medium` confidence the greeting stays "[Company] team",
-the candidate goes to `name_candidate`, and `needs_review: true` is set. At
-`none`, "[Company] team" with no candidate. When in doubt, score down.
+The tool MUST NOT fabricate a name, an email address, a personalization hook,
+or **any statement about the prospect**. This holds identically whether the
+copy is assembled from a locked template or written by the model.
 
-*Rationale: one fabricated name destroys trust in every draft in the batch;
-empty-and-flagged always beats wrong.*
+**Names.** A real first name is used in a draft only at `high` confidence as
+defined in PRODUCT.md §7 (name from `/about`/`/team`, explicit owner text, or
+unambiguous email pattern). At `medium` confidence the greeting stays
+"[Company] team", the candidate goes to `name_candidate`, and
+`needs_review: true` is set. At `none`, "[Company] team" with no candidate.
+When in doubt, score down.
+
+**Claims.** Every sentence asserting anything about the prospect — their city,
+tenure, services, size, reputation, channels, or history — MUST cite the
+identifier of an `Evidence` record captured during research, and the cited
+evidence MUST actually support the claim. Statements about the offered product,
+the offer itself, and the sender are product facts and cite the offer source
+instead. Copy MUST be emitted in a structured, per-claim-citable form; free
+text with no citation structure is not acceptable output.
+
+**Enforcement.** Citations MUST be validated deterministically in plain Python
+— every cited id resolves to a real recorded Evidence record; every
+claim-bearing unit carries a citation. Validation MUST NOT be delegated to a
+model. A draft that fails validation is REJECTED and MUST fall back to the
+locked deterministic template; it is never sent, never silently emptied, and
+never repaired by another model call. Fallbacks MUST be recorded on the note
+and counted in the run summary, so a broken drafting path is visible rather
+than merely quiet *(amended 2026-07-20, v5.0.0)*.
+
+*Rationale: one fabricated detail destroys trust in every draft in the batch,
+and empty-and-flagged always beats wrong. Until v5.0.0 this was guaranteed
+structurally — the model could not write prose, so it could not invent. Once
+the model writes prose, only per-claim citation restores that guarantee: the
+model gains freedom of phrasing, never freedom of fact.*
 
 ### V. Channel Honesty — Claims About the Prospect Require Observed Signals
 
 Every claim in outreach copy **about the prospect's own channels** MUST be
 backed by an open-web signal observed and recorded during research
-(`fb_signal` per PRODUCT.md §7.5). Ad-running is NEVER claimed or implied —
-it is not observable from outside Facebook and the tool never looks inside.
-Describing the **product's own capability** (Omniveer's Duct Lead Qualifier
-answers a Facebook page inbox) is a fact about the product, not the prospect,
-and is permitted in all variants *(amended 2026-07-14, v2.0.0; product
-renamed from "Nestaro" 2026-07-17, v4.0.1)*. Template selection remains
-mechanical: `fb_signal: strong` → variant that references their page activity;
-`weak`/`none` → variant that frames Facebook as product capability only, with
-no assertion about their usage. When the signal is uncertain, default DOWN,
-never up.
+(`fb_signal` per PRODUCT.md §7.5), and MUST cite that signal's evidence record
+per Principle IV. Ad-running is NEVER claimed or implied — it is not observable
+from outside Facebook and the tool never looks inside; ad-claim vocabulary is
+rejected by the validator at every signal level. Describing the **product's own
+capability** (Omniveer's Duct Lead Qualifier answers a Facebook page inbox) is
+a fact about the product, not the prospect, and is permitted at every signal
+level *(amended 2026-07-14, v2.0.0; product renamed from "Nestaro" 2026-07-17,
+v4.0.1)*.
+
+What `fb_signal` gates is what may be *asserted about them*: at `strong`, their
+page activity may be referenced with a citation; at `weak` or `none`, Facebook
+may appear only as product capability, with no assertion about their usage.
+Enforcement moved from mechanical template-variant selection to per-claim
+evidence citation *(amended 2026-07-20, v5.0.0)*; the rule being enforced is
+unchanged. When the signal is uncertain, default DOWN, never up.
 
 *Rationale: honesty means not asserting things about the prospect we haven't
-observed; it does not forbid saying what the product we're offering does.*
+observed; it does not forbid saying what the product we're offering does.
+Variant selection was only ever the mechanism — citation enforces the same
+rule with finer resolution, per sentence rather than per template.*
 
 ### VI. Smallest Viable Build — No Gold-Plating
 
-Scope is bounded by PRODUCT.md; features not specified there MUST NOT be
-built (explicitly excluded: CRM features, web UI, agent frameworks; a guarded,
-approval-gated email sender — Gmail API or authenticated SMTP — is IN scope per
-Principle I). LLM usage is
-single-shot prompt-per-company via OpenRouter with
-direct API calls — no LangChain or other agent/orchestration framework.
+Scope is bounded by PRODUCT.md; features not specified there MUST NOT be built.
+Explicitly **excluded**: CRM features, web UI, agent/orchestration frameworks
+(LangChain, LlamaIndex, and equivalents), and autonomous tool-using or
+multi-step agent loops. Explicitly **in scope**: a guarded, approval-gated
+email sender (Gmail API or authenticated SMTP) per Principle I, and
+rich-instruction drafting per the next paragraph.
+
+**LLM usage** is one OpenRouter call per company via direct HTTP. The call MAY
+carry substantial instruction context assembled from versioned markdown files
+(role/identity, offer, constraints, and writing skills) plus that company's
+recorded research, and MAY request structured output. It MUST NOT become a
+conversation, a retry-until-valid loop, a planner/critic chain, or a
+tool-calling session: the drafting model has **no tools, no network access, and
+no filesystem access**, and receives only already-extracted `Evidence` records
+— never raw fetched HTML. Exactly one drafting call per company per run; on
+failure or validation rejection the deterministic template answers instead
+*(amended 2026-07-20, v5.0.0)*.
+
 External services are called via direct HTTP/SDK calls. Prefer the smallest
-viable diff; do not refactor unrelated code; add persistence (SQLite) only if
-a demonstrated need arises.
+viable diff; do not refactor unrelated code; add persistence (SQLite) only if a
+demonstrated need arises.
 
 *Rationale: the product's value is the research pipeline and honest drafts;
-everything else is drag.*
+everything else is drag. Better instructions are cheap and reviewable in git;
+agent machinery is neither, and a tool-using drafting loop would additionally
+open a path around the Principle II fetch choke point.*
 
 ### VII. Verified Claims Only
 
@@ -253,13 +344,21 @@ verifiably works.
 
 - **Stack (settled)**: Python + Typer CLI; httpx + selectolax + trafilatura for
   fetch/extract; Playwright only as fallback for JS-rendered sites; OpenRouter
-  for single-shot LLM drafting; SQLite only if needed.
+  for single-call LLM drafting; SQLite only if needed.
 - **Secrets**: API keys live in `.env` (gitignored), never hardcoded, never
   committed, never logged.
 - **Input**: CSV or markdown table with minimum `company`, `email`; blank /
   `messenger` / a Facebook URL in the email field routes to the messenger bucket.
-- **Templates are locked** (PRODUCT.md §8): the LLM fills bracketed slots only;
-  template prose is not paraphrased or restyled by the model.
+- **Fallback templates are locked** (PRODUCT.md §8): on the deterministic
+  fallback path the LLM fills bracketed slots only, and template prose is not
+  paraphrased or restyled by the model. This path MUST remain functional and
+  independently tested — it is the honesty floor the agent path falls back to.
+- **Drafting instruction files**: the identity, offer, constraint, and skill
+  markdown files that steer the drafting call are **content, not code**. They
+  live in the repository under version control, are reviewed like prose, and
+  MUST NOT contain secrets, credentials, live URLs to be fetched, or
+  instructions that would weaken Principles I–V. They cannot grant the model
+  capabilities the code does not give it.
 - **Rate courtesy**: scraping targets are small businesses' websites — fetch
   politely (timeouts, no hammering, respect robots.txt for crawl paths).
 - **Sourcing (PRODUCT.md §10)**: candidate discovery uses the Google Places
@@ -295,4 +394,4 @@ verifiably works.
 - **Compliance review**: every plan and PR is checked against Principles I–VII
   before merge; violations block until resolved or the constitution is amended.
 
-**Version**: 4.0.1 | **Ratified**: 2026-07-13 | **Last Amended**: 2026-07-17
+**Version**: 5.0.0 | **Ratified**: 2026-07-13 | **Last Amended**: 2026-07-20
