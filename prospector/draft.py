@@ -72,8 +72,8 @@ Reply to this email if you'd like one of the five pilot spots, or book a demo th
 )
 
 MESSENGER_DM_TEMPLATE = (
-    "Hey! I'm giving 5 duct cleaning companies a free 10-day run of Duct Lead "
-    "Qualifier, an AI assistant that answers your page messages in seconds, "
+    "Hey! I'm giving 5 duct cleaning companies a free 10-day pilot of the "
+    "Omniveer Duct Lead Qualifier. It answers your page messages in seconds, "
     "day or night. It checks customers are real{city_clause}, quotes your real "
     "prices, and books them into open slots on your calendar. You just get the "
     "finished lead. I set it all up for you. Want one of the 5 spots? "
@@ -89,7 +89,7 @@ EMAIL_INVARIANTS = (
 )
 
 MESSENGER_INVARIANTS = (
-    "Hey! I'm giving 5 duct cleaning companies a free 10-day run of Duct Lead Qualifier,",
+    "Hey! I'm giving 5 duct cleaning companies a free 10-day pilot of the Omniveer Duct Lead Qualifier.",
     "quotes your real prices, and books them into open slots on your calendar.",
     "Want one of the 5 spots? (See it working: " + PRODUCT_URL + ")",
 )
