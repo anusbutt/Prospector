@@ -31,6 +31,7 @@ from prospector.draft import (
     _strip_code_fences,
     build_email_draft,
     expected_greeting,
+    name_tokens,
 )
 from prospector.models import (
     OFFER_CITE,
@@ -38,6 +39,7 @@ from prospector.models import (
     Draft,
     DraftBlock,
     EvidenceRef,
+    FbSignal,
     Prospect,
     ResearchResult,
 )
@@ -61,6 +63,30 @@ TRADE_TOKENS = {
     "carpet", "quality", "master", "masters", "solutions",
 }
 NON_DISTINCTIVE = GENERIC_TOKENS | TRADE_TOKENS
+
+# V13 (added 2026-07-20 after the first live run). Possessive channel phrasing
+# turns a PRODUCT fact into a claim about the prospect: "it answers your
+# Facebook page messages" asserts they have a page and that customers message
+# it. Constitution Principle V permits that only at fb_signal `strong`, and
+# only with the observed signal cited.
+#
+# This was found by the first three real drafts: two of two agent drafts wrote
+# "your Facebook page" at fb_signal `weak`, citing only `offer`. V3 could not
+# see it — the phrase contains no company, city, name, or hook token — which is
+# exactly why a phrase-level rule is needed alongside the token-level one.
+POSSESSIVE_CHANNEL_PHRASES = (
+    "your facebook page",
+    "your fb page",
+    "your page",
+    "your inbox",
+    "your messenger",
+    "your dms",
+    "your direct messages",
+    "messages your page",
+    "message your page",
+)
+
+FB_EVIDENCE_PREFIXES = ("fb_",)
 
 
 class AgentDraftError(Exception):
@@ -268,6 +294,35 @@ def validate_citations(response: AgentResponse, prospect: Prospect, refs: list[E
     return errors
 
 
+def validate_channel_claims(response: AgentResponse, prospect: Prospect) -> list[str]:
+    """Rule V13: possessive channel phrasing is a claim about the prospect.
+
+    Permitted only when the observed signal is `strong` AND the block making the
+    claim cites an `fb_*` evidence record. Anything less defaults down, per
+    Principle V's "when the signal is uncertain, default DOWN, never up"."""
+    errors: list[str] = []
+    for i, block in enumerate(response.blocks, start=1):
+        lowered = block.text.lower()
+        phrase = next((p for p in POSSESSIVE_CHANNEL_PHRASES if p in lowered), None)
+        if phrase is None:
+            continue
+        cites_fb = any(
+            c.startswith(FB_EVIDENCE_PREFIXES) for c in block.cites
+        )
+        if prospect.fb_signal is not FbSignal.STRONG:
+            errors.append(
+                f"block {i} claims the prospect's own channel ({phrase!r}) "
+                f"but fb_signal is {prospect.fb_signal.value!r} — describe what the "
+                f"product does, not what they have"
+            )
+        elif not cites_fb:
+            errors.append(
+                f"block {i} claims the prospect's own channel ({phrase!r}) "
+                f"without citing the observed fb_* signal"
+            )
+    return errors
+
+
 def validate_retained(subject: str, body: str, prospect: Prospect) -> list[str]:
     """Rules V5-V12 (§5.2): the checks that survive free prose, reusing
     `draft.py`'s existing predicates and constants."""
@@ -307,19 +362,26 @@ def validate_retained(subject: str, body: str, prospect: Prospect) -> list[str]:
         if prospect.name_used.lower() not in sourced:
             errors.append("greeting name does not trace to a recorded source")
 
-    company_tokens = {t for t in re.split(r"[^a-z0-9']+", prospect.company.company.lower()) if t}
-    subject_tokens = [t for t in re.split(r"[^a-z0-9']+", subject.lower()) if t]
-    unknown = [t for t in subject_tokens if t not in company_tokens]
+    # Subject rule, revised 2026-07-20 after the first live run. The original
+    # "only words from the company name" rule came from the template era, where
+    # the model filled a single `subject_company` slot inside a fixed pattern.
+    # Applied to a whole agent-written subject it forbids every creative line —
+    # it rejected "Drew's inbox that answers itself", which is good copy and
+    # invents nothing. Varied subject lines also matter for deliverability on a
+    # ramping domain, so the rule now guards against invention rather than
+    # against originality.
+    company_tokens = name_tokens(prospect.company.company)
+    subject_tokens = name_tokens(subject)
     if not subject_tokens:
         errors.append("subject is empty")
-    elif not any(t in company_tokens for t in subject_tokens):
-        errors.append("subject_company contains words not in the company name")
-    else:
-        # Offer vocabulary is permitted alongside the company's own words.
-        allowed = {"free", "day", "10", "pilot", "for", "spots", "duct", "lead", "qualifier", "a", "the"}
-        stray = [t for t in unknown if t not in allowed]
-        if stray:
-            errors.append(f"subject contains words not in the company name: {stray}")
+    elif not (subject_tokens & company_tokens):
+        # Must be recognisably about THIS company: a subject sharing no word
+        # with their name is either generic or addressed to somebody else.
+        errors.append(
+            f"subject shares no word with the company name ({prospect.company.company!r})"
+        )
+    if len(subject) > 90:
+        errors.append(f"subject is {len(subject)} chars (max 90)")
 
     return errors
 
@@ -327,8 +389,10 @@ def validate_retained(subject: str, body: str, prospect: Prospect) -> list[str]:
 def validate(response: AgentResponse, body: str, prospect: Prospect, refs: list[EvidenceRef]) -> list[str]:
     """All rules. Every failure is collected so the operator sees each one
     (FR-314) — no short-circuiting."""
-    return validate_citations(response, prospect, refs) + validate_retained(
-        response.subject, body, prospect
+    return (
+        validate_citations(response, prospect, refs)
+        + validate_channel_claims(response, prospect)
+        + validate_retained(response.subject, body, prospect)
     )
 
 
@@ -362,6 +426,9 @@ def draft_email(prospect: Prospect, settings: Settings, instructions=None) -> Dr
                     model=settings.openrouter_model,
                     validated=True,
                     source="agent",
+                    # Kept, not discarded: the operator's review is the only
+                    # check that a cited record actually SUPPORTS its sentence.
+                    citations=[list(block.cites) for block in response.blocks],
                 )
             reason = "; ".join(errors)
         except AgentDraftError as exc:

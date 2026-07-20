@@ -70,9 +70,49 @@ else is preserved, not corrected. The dashboard groups on whatever is present.
 | `status` | human | preserved |
 | `outcome` | **human** | **preserved** *(new)* |
 | `## Draft` | machine | from fresh, **unless frozen** *(new)* |
+| `## Citations` | machine | from fresh, **unless frozen** *(new)* |
 | `## Research` | machine | from fresh, always — including frozen notes |
 | `## Log` | human | preserved verbatim |
 | Unrecognized sections | human | preserved, after known sections, original order |
+
+Section order is `Draft, Citations, Research, Log`. Citations sit directly under
+the draft so a reviewer reads a paragraph and glances one line down. Notes
+written before this feature have no Citations section and are skipped, so
+nothing is reordered.
+
+---
+
+## 2a. The `## Citations` section
+
+Present only on agent drafts. Template drafts make no per-paragraph claims, so
+they get no section — and a re-run that falls back to the template **removes**
+an existing Citations section rather than leaving a stale one.
+
+```markdown
+## Citations
+*What each body paragraph rests on. The tool proves a cited record exists;
+only you can confirm it actually says what the sentence claims.*
+
+1. `hook_source_1` — "over 20 years of experience. All Pro Duct Cleaning is
+   locally owned, operated and licensed in Washington" (https://…/about-us/)
+   `fb_search_active_1` — "All Pro Duct Cleaning LLC | Portland OR - Facebook"
+   (ddg-search: "All Pro Duct Cleaning LLC" facebook)
+2. `offer` — the offer, product, or sender (not a claim about them)
+```
+
+**Numbering** matches the body paragraphs *below the greeting*. The greeting and
+sign-off are written by code, never the model, so they carry no citation.
+
+**Why it exists.** Validation proves a cited record exists and belongs to this
+company; it cannot prove the record *supports* the sentence. That second check
+is the operator's, and it is impossible to perform unless the note shows which
+record each paragraph claimed. Without this section, SC-302 ("every
+personalized statement traces to a research record an operator can inspect from
+the same note") is only half delivered.
+
+**Frozen notes keep their citations.** Preserving a draft while refreshing its
+citations would produce a note whose trace describes copy that was never sent —
+worse than no trace at all. `DRAFT_OWNED_SECTIONS` moves both together.
 
 ---
 

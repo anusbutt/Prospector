@@ -70,6 +70,29 @@ to catch, and it is checked by exact text matching. It will be caught.
 - **Never say or imply they run ads.** Not "your ads", not "ad spend", not
   "advertising", not "campaigns". This is not observable from outside and is
   never claimed. Any of those words causes rejection.
+### Never say "your page", "your inbox", or "your Facebook page"
+
+This is the single easiest rule to break, so read it twice.
+
+Describing what the **product** does is always fine. Describing what **they
+have** is a claim about the prospect and needs observed evidence.
+
+The word "your" is what turns one into the other:
+
+| Rejected | Write this instead |
+|----------|--------------------|
+| "It answers **your Facebook page** messages" | "It answers Facebook page messages" |
+| "when someone messages **your page** at 9pm" | "when someone messages a business at 9pm" |
+| "It watches **your inbox**" | "It watches the page inbox" |
+
+Banned outright unless the evidence catalogue contains an `fb_*` record, you
+cite it in that same block, **and** you were told the signal is strong:
+"your facebook page", "your fb page", "your page", "your inbox",
+"your messenger", "your dms", "your direct messages", "messages your page".
+
+A page appearing in search results is not proof they read it. Say what the tool
+does. Never say what they own.
+
 - **Never assert they use Facebook** unless you were given `fb_*` evidence and
   you cite it. Describing what the *product* does with a Facebook inbox is a
   fact about the product and is always fine. Saying *they* are active on
@@ -86,11 +109,17 @@ to catch, and it is checked by exact text matching. It will be caught.
 
 ## The subject line
 
-- May only use words that appear in the company's own name, plus ordinary
-  words about the offer. Do not add words to their name, and do not invent a
-  name for them. You may shorten: "Acme Duct Cleaning LLC" may become
-  "Acme Duct".
-- No placeholders. No brackets.
+Write a real subject line. You have latitude here, and identical subjects
+across a batch are worse than varied ones.
+
+- **It must share at least one word with the company's own name**, so it is
+  recognisably about them. "Drew's inbox that answers itself" and
+  "All Pro Duct — 10-day pilot" both qualify.
+- **Never invent or alter their name.** You may shorten: "Acme Duct Cleaning
+  LLC" may become "Acme Duct". You may not add words to it or call them
+  something they are not.
+- Keep it under 90 characters. Shorter is better.
+- No placeholders, no brackets, no ad-running language, no urgency.
 
 ## No placeholders anywhere
 

@@ -225,7 +225,14 @@ def _write(
 ) -> tuple[str, str]:
     draft_md = vault.draft_markdown_for(draft, prospect, no_llm=no_llm and prospect.company.channel is Channel.EMAIL)
     research_md = vault.build_research_markdown(prospect)
-    note = vault.render_note(prospect, draft_md, research_md, draft=draft)
+    # Rebuilt rather than carried: id assignment is deterministic over the same
+    # research, so this reproduces exactly what the validator resolved against.
+    citations_md = vault.build_citations_markdown(
+        draft, agent_draft.build_evidence_refs(prospect.research)
+    )
+    note = vault.render_note(
+        prospect, draft_md, research_md, draft=draft, citations_markdown=citations_md
+    )
     result = vault.upsert_note(vault_dir, prospect.company.slug, note, freeze_draft=frozen)
     if frozen:
         detail = f"draft frozen (approved/sent), research refreshed, note {result}"

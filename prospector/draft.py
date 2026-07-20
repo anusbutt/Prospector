@@ -110,6 +110,19 @@ class DraftError(Exception):
     """OpenRouter call failed; company is flagged, batch continues."""
 
 
+# Curly apostrophes are common in scraped company names ("Drew’s"), and a model
+# almost always answers with the straight form ("Drew's"). Splitting on a
+# straight-quote-only class made those two tokenize differently — "drew"+"s"
+# versus "drew's" — so a correct subject was rejected as invented. Normalize the
+# quote and drop it from tokens so both spellings agree.
+_CURLY_QUOTES = str.maketrans({"’": "'", "‘": "'", "ʼ": "'"})
+
+
+def name_tokens(text: str) -> set[str]:
+    """Apostrophe-insensitive word tokens, for company/subject comparison."""
+    return {t for t in re.split(r"[^a-z0-9]+", text.translate(_CURLY_QUOTES).lower()) if t}
+
+
 def _strip_code_fences(content: str) -> str:
     """Some providers ignore response_format and fence the JSON in ```blocks```."""
     text = content.strip()
@@ -262,8 +275,8 @@ def validate_email_draft(subject: str, body: str, prospect: Prospect, slots: dic
             errors.append("greeting name does not trace to a recorded source")
 
     subject_company = str(slots.get("subject_company", "")).strip() or prospect.company.company
-    company_tokens = {t for t in re.split(r"[^a-z0-9']+", prospect.company.company.lower()) if t}
-    subject_tokens = [t for t in re.split(r"[^a-z0-9']+", subject_company.lower()) if t]
+    company_tokens = name_tokens(prospect.company.company)
+    subject_tokens = [t for t in name_tokens(subject_company)]
     if not subject_tokens or any(t not in company_tokens for t in subject_tokens):
         errors.append("subject_company contains words not in the company name")
 

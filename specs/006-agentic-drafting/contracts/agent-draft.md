@@ -158,6 +158,24 @@ The subject is used verbatim from the response after validation.
 Deterministic Python only. No model is consulted (FR-311). **All** checks run
 so every reason is collected (FR-314); any failure rejects the whole draft.
 
+### 5.0 Rule V13 — possessive channel claims (added 2026-07-20)
+
+Added after the first live run, which produced `"your Facebook page"` in **2 of
+2** agent drafts at `fb_signal: weak`, citing only `offer`.
+
+| Rule | Requirement |
+|------|-------------|
+| **V13** | A block containing possessive channel phrasing (`your facebook page`, `your fb page`, `your page`, `your inbox`, `your messenger`, `your dms`, `your direct messages`, `messages your page`) requires `fb_signal == strong` **and** an `fb_*` citation on that same block. |
+
+The word "your" converts a product fact into a claim about the prospect:
+"it answers Facebook page messages" describes the tool; "it answers **your**
+Facebook page messages" asserts they have a page and that customers message it.
+Principle V permits the latter only at `strong`, with the signal cited.
+
+V3 could not catch this — the phrase contains no company, city, name, or hook
+token — which is why a phrase-level rule is needed alongside the token-level
+one. The two rules cover different attack shapes and neither subsumes the other.
+
 ### 5.1 Citation checks (new)
 
 | Rule | Requirement |
@@ -187,7 +205,12 @@ Per FR-312 and FR-313, unchanged in meaning:
 | **V9** | No unfilled `[slot]` markers in body or subject. |
 | **V10** | Body starts with the expected greeting. |
 | **V11** | If `name_used != "team"`, the greeting name traces to recorded evidence or the input `owner_name`. |
-| **V12** | `subject` contains only tokens drawn from the company name. |
+| **V12** | `subject` shares at least one word with the company name, is non-empty, and is ≤ 90 chars. *(Revised 2026-07-20: the original "only words from the company name" rule came from the template era, where the model filled a single `subject_company` slot inside a fixed pattern. Applied to a whole agent-written subject it rejected good copy — "Drew's inbox that answers itself" — and forced identical subject lines across a batch, itself a spam signal. The rule now guards against invention, not against originality.)* |
+
+Company/subject tokenization is apostrophe-insensitive: scraped names carry
+curly apostrophes ("Drew’s") while models answer with straight ones ("Drew's"),
+and splitting on a straight-quote-only class made those tokenize differently —
+rejecting a correct subject as invented. `draft.name_tokens()` normalizes both.
 
 V5–V12 reuse the existing predicates in `draft.py`. They are applied to
 model-written prose rather than template output, which is the whole point: the

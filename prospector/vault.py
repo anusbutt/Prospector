@@ -98,6 +98,7 @@ def render_note(
     status: str = "to-send",
     log_markdown: str = "-",
     draft: Draft | None = None,
+    citations_markdown: str = "",
 ) -> str:
     company = prospect.company
     values = {
@@ -132,6 +133,10 @@ def render_note(
     lines.append("## Draft")
     lines.append(draft_markdown.strip("\n"))
     lines.append("")
+    if citations_markdown:
+        lines.append("## Citations")
+        lines.append(citations_markdown.strip("\n"))
+        lines.append("")
     lines.append("## Research")
     lines.append(research_markdown.strip("\n"))
     lines.append("")
@@ -154,7 +159,14 @@ def write_note(vault_dir: str | Path, slug: str, content: str) -> str:
     return "created"
 
 
-KNOWN_SECTIONS = ("Draft", "Research", "Log")
+# Citations sit directly under the draft: the reviewer reads a paragraph, then
+# glances one line down to see what it rests on. Existing notes have no
+# Citations section and are simply skipped, so no note is reordered by this.
+KNOWN_SECTIONS = ("Draft", "Citations", "Research", "Log")
+
+# Sections that describe the draft itself, and so are preserved alongside a
+# frozen ## Draft — a preserved draft must keep the citations that justify it.
+DRAFT_OWNED_SECTIONS = ("Draft", "Citations")
 
 # --- Frozen notes (006, FR-326) ---------------------------------------------
 # Copy the human approved, or copy that has already been mailed, is never
@@ -324,8 +336,10 @@ def merge_notes(existing: str, fresh: str, *, freeze_draft: bool = False) -> str
     if "Log" in existing_map:
         merged_sections["Log"] = existing_map["Log"]
     if freeze_draft:
-        if "Draft" in existing_map:
-            merged_sections["Draft"] = existing_map["Draft"]
+        for heading in DRAFT_OWNED_SECTIONS:
+            merged_sections.pop(heading, None)
+            if heading in existing_map:
+                merged_sections[heading] = existing_map[heading]
         for key in DRAFT_OWNED_KEYS:
             merged_fm[key] = existing_fm.get(key, "")
 
@@ -455,6 +469,39 @@ def build_research_markdown(prospect: Prospect) -> str:
     ]
     if prospect.company.duplicate_of:
         lines.insert(0, f"- Duplicate: shares inbox with [[{prospect.company.duplicate_of}]] — one send per inbox")
+    return "\n".join(lines)
+
+
+CITATIONS_PREAMBLE = (
+    "*What each body paragraph rests on. The tool proves a cited record exists; "
+    "only you can confirm it actually says what the sentence claims.*"
+)
+
+
+def build_citations_markdown(draft: Draft | None, refs: list) -> str:
+    """Per-paragraph citation trace for an agent draft (SC-302).
+
+    Numbering matches the body paragraphs BELOW the greeting — the greeting and
+    sign-off are written by code, not the model, so they carry no citation.
+    Returns "" for template drafts, which make no per-paragraph claims and so
+    get no Citations section at all."""
+    if draft is None or not draft.citations:
+        return ""
+    by_id = {ref.id: ref for ref in refs}
+    lines = [CITATIONS_PREAMBLE, ""]
+    for number, cites in enumerate(draft.citations, start=1):
+        rendered = []
+        for cite in cites:
+            ref = by_id.get(cite)
+            if cite == "offer":
+                rendered.append("`offer` — the offer, product, or sender (not a claim about them)")
+            elif ref is None:
+                # Should be unreachable: V2 rejects unknown ids before writing.
+                rendered.append(f"`{cite}` — **unresolved**")
+            else:
+                excerpt = ref.excerpt.strip() or ref.value
+                rendered.append(f'`{ref.id}` — "{excerpt}" ({ref.source})')
+        lines.append(f"{number}. " + "  \n   ".join(rendered))
     return "\n".join(lines)
 
 

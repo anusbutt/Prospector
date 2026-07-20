@@ -108,6 +108,12 @@ class Draft:
     # validated) or "template" (locked deterministic fallback). Defaults to
     # template so every pre-006 construction site keeps its existing meaning.
     source: str = "template"
+    # 006: citations per body paragraph, in order. Retained after validation so
+    # the operator can audit WHICH record each claim rests on — the validator
+    # can only prove a cited record exists, never that it supports the
+    # sentence, and that second check is the human's (SC-302). Empty on the
+    # template path, which makes no per-paragraph claims.
+    citations: list[list[str]] = field(default_factory=list)
 
 
 # --- Agentic drafting (006) -------------------------------------------------
