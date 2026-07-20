@@ -61,16 +61,21 @@ def run_batch(
     for company in companies:
         if verbose:
             _log(f"processing {company.slug} ...")
+        # FR-326: read status BEFORE drafting. A frozen note must cost no LLM
+        # request, so this cannot be deferred to write time.
+        frozen = vault.is_frozen(vault.read_status(vault_dir, company.slug))
         try:
-            prospect, draft = _process_company(company, settings, fetcher, no_llm=no_llm, verbose=verbose)
-            outcome, detail = _write(prospect, draft, vault_dir, no_llm=no_llm)
+            prospect, draft = _process_company(
+                company, settings, fetcher, no_llm=no_llm, verbose=verbose, frozen=frozen
+            )
+            outcome, detail = _write(prospect, draft, vault_dir, no_llm=no_llm, frozen=frozen)
             summary.processed += 1
         except Exception as exc:  # per-company isolation (FR-021)
             _log(f"error: {company.slug}: {exc}")
             prospect = Prospect(company=company, research=ResearchResult(website=company.website))
             prospect.needs_review = True
             prospect.research.failures.append(f"processing failed: {exc}")
-            _write(prospect, None, vault_dir, no_llm=no_llm)
+            _write(prospect, None, vault_dir, no_llm=no_llm, frozen=frozen)
             summary.failed += 1
             outcome, detail = "failed", str(exc)
         _count(summary, prospect)
@@ -80,12 +85,22 @@ def run_batch(
 
 
 def _process_company(
-    company: Company, settings: Settings, fetcher: Fetcher, *, no_llm: bool, verbose: bool
+    company: Company,
+    settings: Settings,
+    fetcher: Fetcher,
+    *,
+    no_llm: bool,
+    verbose: bool,
+    frozen: bool = False,
 ) -> tuple[Prospect, Draft | None]:
     research = _research(company, settings, fetcher, verbose=verbose)
     prospect = _score(company, research, settings)
     draft: Draft | None = None
     if no_llm:
+        return prospect, draft
+    if frozen:
+        # FR-326: approved/sent copy is never regenerated, so no drafting call
+        # is made at all. ## Research still refreshes from the work above.
         return prospect, draft
     if company.channel is Channel.EMAIL:
         try:
@@ -191,12 +206,16 @@ def _score(company: Company, research: ResearchResult, settings: Settings) -> Pr
     return prospect
 
 
-def _write(prospect: Prospect, draft: Draft | None, vault_dir: Path, *, no_llm: bool) -> tuple[str, str]:
+def _write(
+    prospect: Prospect, draft: Draft | None, vault_dir: Path, *, no_llm: bool, frozen: bool = False
+) -> tuple[str, str]:
     draft_md = vault.draft_markdown_for(draft, prospect, no_llm=no_llm and prospect.company.channel is Channel.EMAIL)
     research_md = vault.build_research_markdown(prospect)
     note = vault.render_note(prospect, draft_md, research_md)
-    result = vault.upsert_note(vault_dir, prospect.company.slug, note)
-    if draft is not None and draft.validated:
+    result = vault.upsert_note(vault_dir, prospect.company.slug, note, freeze_draft=frozen)
+    if frozen:
+        detail = f"draft frozen (approved/sent), research refreshed, note {result}"
+    elif draft is not None and draft.validated:
         detail = f"drafted ({prospect.variant.value}), note {result}"
     elif draft is not None:
         detail = f"draft failed validation, note {result}"

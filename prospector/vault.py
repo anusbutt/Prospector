@@ -147,6 +147,43 @@ def write_note(vault_dir: str | Path, slug: str, content: str) -> str:
 
 KNOWN_SECTIONS = ("Draft", "Research", "Log")
 
+# --- Frozen notes (006, FR-326) ---------------------------------------------
+# Copy the human approved, or copy that has already been mailed, is never
+# regenerated: re-drafting an approved note would send words nobody reviewed
+# (Principle I), and re-drafting a sent note would destroy the record of what
+# actually went out. Only "to-send" (and a brand-new note) is drafted.
+#
+# Every OTHER value is frozen, including unrecognized ones — defaulting down,
+# the same way this codebase treats every uncertain signal. An operator who
+# invents `status: hold` gets protection, not a surprise rewrite.
+DRAFTABLE_STATUS = "to-send"
+
+# Frontmatter the machine never overwrites once a human owns it.
+HUMAN_OWNED_KEYS = ("status", "outcome")
+
+# Frontmatter that describes the draft itself, so it is preserved alongside a
+# frozen ## Draft section — a preserved draft must keep its recorded source.
+DRAFT_OWNED_KEYS = ("draft_source",)
+
+
+def read_status(vault_dir: str | Path, slug: str) -> str | None:
+    """Existing note's frontmatter `status`, or None when the note does not
+    exist. Read-only: performs no write and no merge.
+
+    Called BEFORE drafting so a frozen note costs no LLM request (FR-326)."""
+    path = Path(vault_dir) / f"{slug}.md"
+    if not path.is_file():
+        return None
+    frontmatter, _ = parse_note(path.read_text(encoding="utf-8"))
+    return frontmatter.get("status") or None
+
+
+def is_frozen(status: str | None) -> bool:
+    """True when this note's copy must not be regenerated.
+
+    None (new note) and "to-send" are draftable; everything else is frozen."""
+    return status is not None and status != DRAFTABLE_STATUS
+
 
 def parse_note(text: str) -> tuple[dict[str, str], list[tuple[str, str]]]:
     """Split a note into (raw frontmatter dict, ordered [(heading, body)])."""
@@ -252,23 +289,36 @@ def set_status(path: str | Path, new_status: str, log_line: str) -> None:
     path.write_text(out, encoding="utf-8")
 
 
-def merge_notes(existing: str, fresh: str) -> str:
+def merge_notes(existing: str, fresh: str, *, freeze_draft: bool = False) -> str:
     """Section-ownership merge (contracts/note-format.md):
-    machine-owned (from fresh): all frontmatter except status, ## Draft,
-    ## Research. Human-owned (from existing): status — written once, never
-    machine-changed after — ## Log verbatim, and any unrecognized sections,
-    preserved after the known ones in their original order."""
+    machine-owned (from fresh): all frontmatter except status/outcome,
+    ## Draft, ## Research. Human-owned (from existing): status and outcome —
+    written once, never machine-changed after — ## Log verbatim, and any
+    unrecognized sections, preserved after the known ones in their original
+    order.
+
+    `freeze_draft` (006, FR-326): when True the ## Draft section and the
+    draft-describing frontmatter are taken from `existing` instead of `fresh`,
+    so approved and already-sent copy survives a re-run byte-for-byte.
+    ## Research still refreshes — it is machine-owned observation, not
+    approved copy, and keeping it current is useful and harmless."""
     existing_fm, existing_sections = parse_note(existing)
     fresh_fm, fresh_sections = parse_note(fresh)
 
     merged_fm = dict(fresh_fm)
-    if existing_fm.get("status"):
-        merged_fm["status"] = existing_fm["status"]
+    for key in HUMAN_OWNED_KEYS:
+        if existing_fm.get(key):
+            merged_fm[key] = existing_fm[key]
 
     merged_sections = dict(fresh_sections)
     existing_map = dict(existing_sections)
     if "Log" in existing_map:
         merged_sections["Log"] = existing_map["Log"]
+    if freeze_draft:
+        if "Draft" in existing_map:
+            merged_sections["Draft"] = existing_map["Draft"]
+        for key in DRAFT_OWNED_KEYS:
+            merged_fm[key] = existing_fm.get(key, "")
 
     ordered = [(h, merged_sections[h]) for h in KNOWN_SECTIONS if h in merged_sections]
     ordered += [(h, b) for h, b in existing_sections if h not in KNOWN_SECTIONS]
@@ -282,15 +332,19 @@ def merge_notes(existing: str, fresh: str) -> str:
     return "\n".join(out) + "\n" + "\n\n".join(blocks) + "\n"
 
 
-def upsert_note(vault_dir: str | Path, slug: str, fresh_content: str) -> str:
+def upsert_note(
+    vault_dir: str | Path, slug: str, fresh_content: str, *, freeze_draft: bool = False
+) -> str:
     """Create the note, or merge machine-owned regions into the existing one.
-    Returns 'created' | 'updated' | 'unchanged'; writes only when bytes differ."""
+    Returns 'created' | 'updated' | 'unchanged'; writes only when bytes differ.
+
+    `freeze_draft` preserves the existing ## Draft (see merge_notes)."""
     vault_dir = Path(vault_dir)
     path = vault_dir / f"{slug}.md"
     if not path.exists():
         return write_note(vault_dir, slug, fresh_content)
     existing = path.read_text(encoding="utf-8")
-    merged = merge_notes(existing, fresh_content)
+    merged = merge_notes(existing, fresh_content, freeze_draft=freeze_draft)
     if merged == existing:
         return "unchanged"
     path.write_text(merged, encoding="utf-8")

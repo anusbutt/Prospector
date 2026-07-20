@@ -32,7 +32,7 @@ prospector = "prospector.cli:app"
 include = ["prospector*"]
 
 [tool.setuptools.package-data]
-prospector = ["data/*.txt"]
+prospector = ["data/*.txt", "agent/*.md", "agent/skills/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
