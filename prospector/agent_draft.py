@@ -250,7 +250,18 @@ def _prospect_tokens(prospect: Prospect) -> list[str]:
         tokens.append(prospect.name_candidate.lower())
     if prospect.research.hook:
         tokens.append(prospect.research.hook.lower())
-    return [t for t in dict.fromkeys(tokens) if t]
+
+    # Defensive floor. Research can produce a junk single-word city or name
+    # ("We", from "Serving We Clean Ducts..."), and a 2-3 letter token matches
+    # ordinary prose everywhere — rejecting good drafts for containing the word
+    # "we". Extraction is fixed at the source; this stops any future junk short
+    # value from silently becoming a false positive here. Multi-word values are
+    # kept at any length: "we service area" is specific enough to mean something.
+    return [
+        t
+        for t in dict.fromkeys(tokens)
+        if t and (len(t) >= 4 or " " in t)
+    ]
 
 
 def validate_citations(response: AgentResponse, prospect: Prospect, refs: list[EvidenceRef]) -> list[str]:

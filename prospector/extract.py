@@ -45,6 +45,13 @@ NON_NAME_WORDS = {
     "meet", "staff", "crew", "reviews", "faq", "areas", "pricing", "book",
     "any", "main", "quick", "whether", "owner", "operated", "office", "links",
     "time", "response", "satisfaction", "guaranteed", "your", "you", "the",
+    # Pronouns and determiners. "Serving We Clean Ducts customers..." captured
+    # "We" as a city, producing `city: We` and `hook: We service area` — junk
+    # that reached the note and then made every sentence containing the word
+    # "we" look like a claim about the prospect. Filter at the source.
+    "we", "us", "our", "ours", "they", "them", "their", "it", "its", "this",
+    "that", "these", "those", "all", "some", "most", "many", "each", "every",
+    "other", "others", "same", "more", "less", "here", "there", "when", "where",
 }
 
 
