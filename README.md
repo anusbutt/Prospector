@@ -30,6 +30,27 @@ These are hard constraints enforced in code and tests, not aspirations
 | 5 | **Never claims what it can't observe** | Ad-running is never claimed or implied. Statements about the *prospect's own* Facebook activity appear only when observed open-web signals support them and the draft cites them (uncertain signals always rank *down*); describing the offered product's Facebook capability is a product fact, not a claim about the prospect. |
 | 6 | **No web UI** | The Obsidian vault *is* the interface. |
 
+## Architecture at a glance
+
+![Prospector architecture](docs/architecture.png)
+
+Three machines on a conveyor belt, and the belt is the Obsidian vault:
+
+- **Machine 1 — research** finds what's true and writes it into a note, with a
+  source attached to every fact.
+- **Machine 2 — draft** reads those facts, writes personalized prose, and a
+  **validator rejects any sentence that can't cite its source** — falling back
+  to a locked template rather than shipping an unverifiable claim.
+- **Machine 3 — send** picks up only the notes a human marked `approved` and
+  mails them, recording every send in an append-only ledger.
+
+The machines never talk to each other directly — they only read and write the
+vault. **The human is a stage in the belt**, not a bystander: approval is a
+person changing one word (`to-send` → `approved`) inside a note. Every
+dangerous action is funnelled through a single guarded door — Facebook-blocking
+on fetch, citation on the draft, approval on the send — and a re-run refreshes
+the facts while freezing anything a human has touched.
+
 ## How it works
 
 ```
@@ -37,9 +58,10 @@ CSV / markdown list
       │
       ▼
 ingest ──► dedupe & bucket ──► resolve ──► fetch ──► extract ──► score ──► draft ──► vault
-                                (Places /   (polite,   (names,     (§ conf-  (locked    (one note per
-                                 DuckDuckGo)  FB-host    city, hook, idence +  templates, company +
-                                              blocked)   FB signals) fb_signal) 1 LLM call) dashboard)
+                                (Places /   (polite,   (names,     (§ conf-  (agent    (one note per
+                                 DuckDuckGo)  FB-host    city, hook, idence +  writes,   company +
+                                              blocked)   FB signals) fb_signal) cited +   dashboard)
+                                                                                validated)
       │
       ▼
 YOU review in Obsidian ──► set status: approved ──► prospector send ──► Gmail API / SMTP
@@ -235,6 +257,8 @@ angle: offer-led
 fb_signal: none
 duplicate_of:
 needs_review: false
+draft_source: agent          # agent | template — which path wrote this copy
+outcome:                     # human-owned: replied | interested | bounced | no
 tags: [outreach, duct-cleaning, prospector]
 ---
 
@@ -242,6 +266,13 @@ tags: [outreach, duct-cleaning, prospector]
 **Subject:** ...paste-ready subject...
 
 ...paste-ready body...
+
+## Citations
+*What each body paragraph rests on. The tool proves a cited record exists;
+only you can confirm it actually says what the sentence claims.*
+
+1. `hook_source_1` — "...serving the Denver area for 18 years..." (summitduct.example.com/about)
+2. `offer` — the offer, product, or sender (not a claim about them)
 
 ## Research
 - Owner name: not found (no /about page)
@@ -253,6 +284,14 @@ tags: [outreach, duct-cleaning, prospector]
 ## Log
 -
 ```
+
+On an **agent-written** note, a `## Citations` section maps each body paragraph
+to the research record it rests on — the interface for the one check the
+validator cannot perform (whether a real record actually *supports* a sentence,
+not merely that it exists). **Template-fallback notes have no Citations
+section**, since they make no per-paragraph claims. `draft_source` records which
+path ran; `outcome` is yours to fill in when a prospect replies, and the
+dashboard groups reply outcomes by drafting path so the two can be compared.
 
 `_Dashboard.md` provides live queues via the
 [Dataview](https://blacksmithgu.github.io/obsidian-dataview/) community plugin
@@ -347,16 +386,20 @@ below 100 — deliverability, not the code, is the limiting factor.
 ## Design notes
 
 - **Deterministic honesty core, LLM at the edge.** Everything that affects
-  trust — confidence scoring, signal classification, template selection,
-  validation — is plain Python with unit tests. The LLM's only job is phrasing
-  slot values, and even those are validated after the fact.
+  trust — confidence scoring, signal classification, and validation — is plain
+  Python with unit tests. The LLM writes the prose but decides nothing: it must
+  cite a recorded source for every claim, a deterministic validator resolves
+  each citation, and anything unverifiable is discarded in favour of a locked
+  template. The model gains freedom of phrasing, never freedom of fact.
 - **Spec-driven.** The project was built constitution → spec → plan → tasks →
   implementation; all artifacts are in [`specs/001-prospector-cli/`](specs/001-prospector-cli/)
   and the product intent in [`PRODUCT.md`](PRODUCT.md).
-- **Verification.** A 200-test offline suite (network and LLM stubbed at the
+- **Verification.** A ~500-test offline suite (network and LLM stubbed at the
   httpx-transport level) covers the pipeline, including transport-level proof
-  that no request ever reaches a Facebook host and golden tests that locked
-  template prose survives byte-for-byte. Validated live against real companies
+  that no request ever reaches a Facebook host, adversarial tests that every
+  uncited or laundered claim is rejected, and a proof that the locked-template
+  path is byte-for-byte unchanged by the agent work. Validated live against real
+  companies
   before release. The suite is kept out of this repository.
 
 ## Honest limitations
@@ -366,9 +409,11 @@ below 100 — deliverability, not the code, is the limiting factor.
   perfection. Everything below high confidence is flagged, never guessed.
 - Heuristics are tuned for US/English local-service businesses with simple
   websites. Enterprises, e-commerce, and non-English markets would need work.
-- The message templates encode one specific offer and voice. Adapting the tool
-  to another vertical means supplying your own templates (a planned
-  campaign-profile feature would make that configuration, not code).
+- The drafting voice and offer live in four Markdown files under
+  `prospector/agent/` (identity, offer, constraints, writing skill) plus one
+  locked-template fallback. Adapting the tool to another vertical means editing
+  that prose — no code change — though the extraction heuristics and the locked
+  template still assume the duct-cleaning offer.
 
 ## License
 
