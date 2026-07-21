@@ -25,6 +25,10 @@ FRONTMATTER_KEYS = (
     "fb_signal",
     "duplicate_of",
     "needs_review",
+    # 006: appended (not inserted) so existing notes keep their key order and
+    # the first re-run produces content diffs, not 130 reorderings.
+    "draft_source",
+    "outcome",
     "tags",
 )
 
@@ -93,6 +97,8 @@ def render_note(
     *,
     status: str = "to-send",
     log_markdown: str = "-",
+    draft: Draft | None = None,
+    citations_markdown: str = "",
 ) -> str:
     company = prospect.company
     values = {
@@ -109,6 +115,10 @@ def render_note(
         "fb_signal": prospect.fb_signal.value,
         "duplicate_of": company.duplicate_of,
         "needs_review": bool(prospect.needs_review or company.needs_review),
+        # Empty when nothing was drafted this run (frozen, --no-llm).
+        "draft_source": draft.source if draft is not None else None,
+        # Human-owned: written empty on creation and never machine-set again.
+        "outcome": None,
         "tags": None,  # rendered specially below
     }
     lines = ["---"]
@@ -123,6 +133,10 @@ def render_note(
     lines.append("## Draft")
     lines.append(draft_markdown.strip("\n"))
     lines.append("")
+    if citations_markdown:
+        lines.append("## Citations")
+        lines.append(citations_markdown.strip("\n"))
+        lines.append("")
     lines.append("## Research")
     lines.append(research_markdown.strip("\n"))
     lines.append("")
@@ -145,7 +159,51 @@ def write_note(vault_dir: str | Path, slug: str, content: str) -> str:
     return "created"
 
 
-KNOWN_SECTIONS = ("Draft", "Research", "Log")
+# Citations sit directly under the draft: the reviewer reads a paragraph, then
+# glances one line down to see what it rests on. Existing notes have no
+# Citations section and are simply skipped, so no note is reordered by this.
+KNOWN_SECTIONS = ("Draft", "Citations", "Research", "Log")
+
+# Sections that describe the draft itself, and so are preserved alongside a
+# frozen ## Draft — a preserved draft must keep the citations that justify it.
+DRAFT_OWNED_SECTIONS = ("Draft", "Citations")
+
+# --- Frozen notes (006, FR-326) ---------------------------------------------
+# Copy the human approved, or copy that has already been mailed, is never
+# regenerated: re-drafting an approved note would send words nobody reviewed
+# (Principle I), and re-drafting a sent note would destroy the record of what
+# actually went out. Only "to-send" (and a brand-new note) is drafted.
+#
+# Every OTHER value is frozen, including unrecognized ones — defaulting down,
+# the same way this codebase treats every uncertain signal. An operator who
+# invents `status: hold` gets protection, not a surprise rewrite.
+DRAFTABLE_STATUS = "to-send"
+
+# Frontmatter the machine never overwrites once a human owns it.
+HUMAN_OWNED_KEYS = ("status", "outcome")
+
+# Frontmatter that describes the draft itself, so it is preserved alongside a
+# frozen ## Draft section — a preserved draft must keep its recorded source.
+DRAFT_OWNED_KEYS = ("draft_source",)
+
+
+def read_status(vault_dir: str | Path, slug: str) -> str | None:
+    """Existing note's frontmatter `status`, or None when the note does not
+    exist. Read-only: performs no write and no merge.
+
+    Called BEFORE drafting so a frozen note costs no LLM request (FR-326)."""
+    path = Path(vault_dir) / f"{slug}.md"
+    if not path.is_file():
+        return None
+    frontmatter, _ = parse_note(path.read_text(encoding="utf-8"))
+    return frontmatter.get("status") or None
+
+
+def is_frozen(status: str | None) -> bool:
+    """True when this note's copy must not be regenerated.
+
+    None (new note) and "to-send" are draftable; everything else is frozen."""
+    return status is not None and status != DRAFTABLE_STATUS
 
 
 def parse_note(text: str) -> tuple[dict[str, str], list[tuple[str, str]]]:
@@ -252,23 +310,38 @@ def set_status(path: str | Path, new_status: str, log_line: str) -> None:
     path.write_text(out, encoding="utf-8")
 
 
-def merge_notes(existing: str, fresh: str) -> str:
+def merge_notes(existing: str, fresh: str, *, freeze_draft: bool = False) -> str:
     """Section-ownership merge (contracts/note-format.md):
-    machine-owned (from fresh): all frontmatter except status, ## Draft,
-    ## Research. Human-owned (from existing): status — written once, never
-    machine-changed after — ## Log verbatim, and any unrecognized sections,
-    preserved after the known ones in their original order."""
+    machine-owned (from fresh): all frontmatter except status/outcome,
+    ## Draft, ## Research. Human-owned (from existing): status and outcome —
+    written once, never machine-changed after — ## Log verbatim, and any
+    unrecognized sections, preserved after the known ones in their original
+    order.
+
+    `freeze_draft` (006, FR-326): when True the ## Draft section and the
+    draft-describing frontmatter are taken from `existing` instead of `fresh`,
+    so approved and already-sent copy survives a re-run byte-for-byte.
+    ## Research still refreshes — it is machine-owned observation, not
+    approved copy, and keeping it current is useful and harmless."""
     existing_fm, existing_sections = parse_note(existing)
     fresh_fm, fresh_sections = parse_note(fresh)
 
     merged_fm = dict(fresh_fm)
-    if existing_fm.get("status"):
-        merged_fm["status"] = existing_fm["status"]
+    for key in HUMAN_OWNED_KEYS:
+        if existing_fm.get(key):
+            merged_fm[key] = existing_fm[key]
 
     merged_sections = dict(fresh_sections)
     existing_map = dict(existing_sections)
     if "Log" in existing_map:
         merged_sections["Log"] = existing_map["Log"]
+    if freeze_draft:
+        for heading in DRAFT_OWNED_SECTIONS:
+            merged_sections.pop(heading, None)
+            if heading in existing_map:
+                merged_sections[heading] = existing_map[heading]
+        for key in DRAFT_OWNED_KEYS:
+            merged_fm[key] = existing_fm.get(key, "")
 
     ordered = [(h, merged_sections[h]) for h in KNOWN_SECTIONS if h in merged_sections]
     ordered += [(h, b) for h, b in existing_sections if h not in KNOWN_SECTIONS]
@@ -282,15 +355,19 @@ def merge_notes(existing: str, fresh: str) -> str:
     return "\n".join(out) + "\n" + "\n\n".join(blocks) + "\n"
 
 
-def upsert_note(vault_dir: str | Path, slug: str, fresh_content: str) -> str:
+def upsert_note(
+    vault_dir: str | Path, slug: str, fresh_content: str, *, freeze_draft: bool = False
+) -> str:
     """Create the note, or merge machine-owned regions into the existing one.
-    Returns 'created' | 'updated' | 'unchanged'; writes only when bytes differ."""
+    Returns 'created' | 'updated' | 'unchanged'; writes only when bytes differ.
+
+    `freeze_draft` preserves the existing ## Draft (see merge_notes)."""
     vault_dir = Path(vault_dir)
     path = vault_dir / f"{slug}.md"
     if not path.exists():
         return write_note(vault_dir, slug, fresh_content)
     existing = path.read_text(encoding="utf-8")
-    merged = merge_notes(existing, fresh_content)
+    merged = merge_notes(existing, fresh_content, freeze_draft=freeze_draft)
     if merged == existing:
         return "unchanged"
     path.write_text(merged, encoding="utf-8")
@@ -335,6 +412,28 @@ TABLE rows.company AS Companies
 FROM #prospector
 GROUP BY status
 ```
+
+## Draft source
+
+```dataview
+TABLE rows.company AS Companies
+FROM #prospector
+GROUP BY draft_source
+```
+
+## Outcomes by draft source
+
+> Fill in `outcome:` by hand when a prospect replies (`replied`, `interested`,
+> `bounced`, `no`). It is yours: the tool writes it empty once and never
+> touches it again. This table is the only way to tell whether agent-written
+> copy beat the template it replaced.
+
+```dataview
+TABLE rows.company AS Companies
+FROM #prospector
+WHERE outcome
+GROUP BY draft_source + " / " + outcome
+```
 """
 
 
@@ -370,6 +469,39 @@ def build_research_markdown(prospect: Prospect) -> str:
     ]
     if prospect.company.duplicate_of:
         lines.insert(0, f"- Duplicate: shares inbox with [[{prospect.company.duplicate_of}]] — one send per inbox")
+    return "\n".join(lines)
+
+
+CITATIONS_PREAMBLE = (
+    "*What each body paragraph rests on. The tool proves a cited record exists; "
+    "only you can confirm it actually says what the sentence claims.*"
+)
+
+
+def build_citations_markdown(draft: Draft | None, refs: list) -> str:
+    """Per-paragraph citation trace for an agent draft (SC-302).
+
+    Numbering matches the body paragraphs BELOW the greeting — the greeting and
+    sign-off are written by code, not the model, so they carry no citation.
+    Returns "" for template drafts, which make no per-paragraph claims and so
+    get no Citations section at all."""
+    if draft is None or not draft.citations:
+        return ""
+    by_id = {ref.id: ref for ref in refs}
+    lines = [CITATIONS_PREAMBLE, ""]
+    for number, cites in enumerate(draft.citations, start=1):
+        rendered = []
+        for cite in cites:
+            ref = by_id.get(cite)
+            if cite == "offer":
+                rendered.append("`offer` — the offer, product, or sender (not a claim about them)")
+            elif ref is None:
+                # Should be unreachable: V2 rejects unknown ids before writing.
+                rendered.append(f"`{cite}` — **unresolved**")
+            else:
+                excerpt = ref.excerpt.strip() or ref.value
+                rendered.append(f'`{ref.id}` — "{excerpt}" ({ref.source})')
+        lines.append(f"{number}. " + "  \n   ".join(rendered))
     return "\n".join(lines)
 
 

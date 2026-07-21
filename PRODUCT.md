@@ -10,13 +10,13 @@ Target lift: move a batch from ~2/20 named to ~10/20 named, auto-dedupe, and cha
 
 ## 2. What it is
 
-A **CLI batch tool** that takes a list of companies and, per company: finds the owner's first name (open web only), grabs one personalization hook, detects channel (email vs Messenger-only) and catches duplicate inboxes, scores name confidence, drafts a paste-ready message in the owner's locked voice, and writes one Obsidian note per company plus a dashboard note. The human reviews the vault and marks a note `status: approved`; an optional **`send` stage** (§11, feature 003) then delivers only approved notes via the Gmail API, under a ramped daily cap, dry-run by default, with an immutable send ledger.
+A **CLI batch tool** that takes a list of companies and, per company: finds the owner's first name (open web only), grabs one personalization hook, detects channel (email vs Messenger-only) and catches duplicate inboxes, scores name confidence, drafts a paste-ready message in the owner's locked voice, and writes one Obsidian note per company plus a dashboard note. The human reviews the vault and marks a note `status: approved`; an optional **`send` stage** (§11, features 003/004) then delivers only approved notes through the configured email provider — the Gmail API or authenticated SMTP (e.g. a Zoho custom-domain mailbox) — under a ramped daily cap, dry-run by default, with an immutable send ledger.
 
 An optional **`source` stage** (§10) builds that input list in the first place: it discovers companies via Google Places across US metros and filters to those showing Meta-ad infrastructure on their own site.
 
 ## 3. Non-goals (do not build)
 
-- **No unguarded / bulk sender.** Sending is limited to the guarded, approval-gated Gmail path defined in Principle I and §11 (feature 003): only `status: approved` notes, only from the Nestaro account, under a ramped daily cap, dry-run by default. Never the operator's personal account; never an unapproved, off-channel, or over-cap send. A general-purpose or transactional-ESP sender is still out of scope.
+- **No unguarded / bulk sender.** Sending is limited to the guarded, approval-gated path defined in Principle I and §11 (features 003/004): only `status: approved` notes, only from the configured dedicated outreach mailbox (Gmail API or authenticated SMTP), under a ramped daily cap, dry-run by default. Never the operator's personal account; never an unapproved, off-channel, or over-cap send. A general-purpose or transactional-ESP sender is still out of scope.
 - **No Facebook API / MCP / scraping.** (See §5.)
 - **No web UI / dashboard app.** Obsidian is the interface.
 - **No agent framework** (no LangChain). Direct single-shot LLM calls.
@@ -101,47 +101,71 @@ Holds **Dataview** queries (community plugin — note in README; plain notes sti
 
 We can't verify ads, but we can cheaply gauge whether Facebook is even a channel they use — all from the open web, never from inside FB:
 
-- **strong** → two or more of: website prominently links to / embeds their Facebook page; site has a Messenger/FB chat widget; Google/search results show an active FB page (recent posts or reviews); `facebook_url` given as input and the page resolves as active in search. → Draft the **Facebook variant** (references their page activity directly: "when someone messages your page").
-- **weak** / **none** → one soft signal or nothing findable. → Draft the **channel-agnostic variant**: Facebook appears only as a fact about the product ("Nestaro lives in your Facebook page inbox"), with no assertion about their page usage or activity.
+- **strong** → two or more of: website prominently links to / embeds their Facebook page; site has a Messenger/FB chat widget; Google/search results show an active FB page (recent posts or reviews); `facebook_url` given as input and the page resolves as active in search.
+- **weak** / **none** → one soft signal or nothing findable.
 
-Honesty rule mirrors §7: when unsure, **default down** (`weak`/`none`), never up. *(Amended 2026-07-14, constitution v2.0.0: the product is Nestaro, a Facebook-Messenger agent — it cannot be described without naming Facebook. The signal now gates claims about the prospect's usage, not product-fact mentions. Ad-running is still never claimed at any level.)*
+The signal is researched and recorded in frontmatter for review (and remains available to future copy variants). *(Copy revision 2026-07-17: the current email template is **channel-neutral** — it describes what the product does for leads without naming Facebook or asserting anything about the prospect's channels, so both signal levels share one body. This satisfies the honesty gate trivially: a claims-free draft is always "defaulted down".)*
 
-## 8. Locked message templates
+Honesty rule mirrors §7: when unsure, **default down** (`weak`/`none`), never up. *(Amended 2026-07-14, constitution v2.0.0: the offered product is a Facebook-Messenger agent; the signal gates claims about the prospect's usage, not product-fact mentions. Ad-running is still never claimed at any level. Rebranded 2026-07-17: the product is Omniveer's **Duct Lead Qualifier**, formerly "Nestaro"; the rule is unchanged.)*
 
-Model fills bracketed slots only. Voice: short, human, practitioner. No hashtags. No AI-sounding language. No em-dash pile-ups.
+## 8. Message generation
 
-The offer *(updated 2026-07-14)*: **Nestaro** (`lead_qualifier_feature.md`) — free 10-day run for 5 duct-cleaning companies, set up entirely by Anas.
+*(revised 2026-07-20, feature 006 — supersedes "locked message templates")*
 
-**Variant selection:** `fb_signal: strong` → Facebook variant. `weak` / `none` → channel-agnostic variant. Messenger bucket → Messenger DM.
+The model **writes the email body**, steered by four versioned markdown files in
+`prospector/agent/` (`IDENTITY.md`, `OFFER.md`, `CONSTRAINTS.md`,
+`skills/write-cold-email.md`). These are content, not code: editing them changes
+the copy with no code change. Voice: short, human, practitioner. No hashtags. No
+AI-sounding language. No em-dash pile-ups.
 
-### Email — Facebook variant (`fb_signal: strong`)
+**Honesty is enforced by citation, not by locked prose.** The model returns a
+subject and 3-6 blocks, each declaring which recorded evidence supports it. A
+deterministic validator (never another model) resolves every citation against
+records actually captured for that company. Offer, product, and sender facts
+cite the reserved id `offer` - and a block citing only `offer` may not mention
+the company name, city, owner name, or hook, which is what stops a prospect
+claim being laundered through the offer.
+
+The **greeting and signature are assembled in code**, never written by the
+model, so a fabricated name has no channel to enter through.
+
+**The locked template below is retained as the automatic fallback.** Any model
+failure, malformed response, or validation rejection falls back to it, the note
+records `draft_source: template`, and the run summary reports why. The template
+path is unchanged and independently tested; it is the honesty floor.
+
+The offer *(rebranded 2026-07-17)*: **Duct Lead Qualifier** by **Omniveer** (`lead_qualifier_feature.md`, https://www.omniveer.com/duct-lead-qualifier) — free 10-day run for 5 duct-cleaning companies, set up entirely by Anas, Founder at Omniveer.
+
+**Link strategy (2026-07-17):** each email body carries **exactly one promotional link** — the product page (it hosts the explanation and demo, so no separate video link and no attachment). The homepage (https://www.omniveer.com) is reserved for messages about Omniveer broadly, never combined with the product link, and does not appear in these product-outreach templates. The LinkedIn company page (https://www.linkedin.com/company/omniveer/) never appears in the pitch; it may appear only in a compact signature when appropriate — the locked templates omit it rather than force it into every email. No booking link unless one is explicitly configured later. Sign-off: "Anas / Founder at Omniveer" — personal and founder-led; Omniveer is mentioned naturally, the prospect stays the focus; no invented problems, compliments, metrics, integrations, or urgency; no guaranteed bookings/revenue/response claims; each email ends with one simple, low-pressure question.
+
+**Variant selection *(copy revision 2026-07-17)*:** email channel → the single **channel-neutral email template** below (both `fb_signal` levels; the copy makes no claims about the prospect's channels, so the §7.5 gate is trivially satisfied — the signal is still researched and recorded). Messenger bucket → Messenger DM.
+
+### Fallback email template — channel-neutral (all `fb_signal` levels)
 ```
-Subject: free setup for [Company], you keep the bookings
+Subject: Free 10-day pilot for [Company Name]
 
-Hi [Name or "[Company] team"],
+Hi [First Name or "[Company] team"],
 
-[If info@ inbox: "Straight to it, and if this isn't your department, please forward it to whoever handles your bookings."  Else: "Straight to it."]
+I'm giving 5 duct-cleaning companies a free 10-day pilot of the Omniveer Duct Lead Qualifier.
 
-I'm giving 5 duct cleaning companies a free 10-day run of Nestaro, an AI assistant that answers your Facebook page messages for you. I set everything up; it costs you nothing for the ten days.
+It responds to new leads, qualifies them, books appointments when they're ready, sends the full details to your email, and keeps every lead organized in a dashboard.
 
-Here's what it does. When someone messages your page, it replies in seconds, day or night, in a normal human voice. It checks they're [hook: "in your service area" / "around [city]"], quotes your real prices (it never invents a number), and books them into a genuinely open slot on your calendar. You get the finished lead by email: name, phone, address, service, and time. Anything it shouldn't answer gets flagged to you instead of guessed.
+You can see the short demo here:
+https://www.omniveer.com/duct-lead-qualifier
 
-Five spots, first come. Reply here and I'll have yours running this week.
+Reply to this email if you'd like one of the five pilot spots, or book a demo through the page.
 
 Anas
-x.com/iamanusbutt
-linkedin.com/in/anus-yousuf
+Founder, Omniveer
 ```
 
-### Email — channel-agnostic variant (`fb_signal: weak` / `none`)
-Identical except the second paragraph opens as product-fact, asserting nothing about their page activity.
-```
-Here's what it does. Nestaro lives in your Facebook page inbox: when a customer messages, it replies in seconds, day or night, in a normal human voice. It checks they're [hook], quotes your real prices (it never invents a number), and books them into a genuinely open slot on your calendar. You get the finished lead by email: name, phone, address, service, and time. Anything it shouldn't answer gets flagged to you instead of guessed.
-```
+The greeting still follows §7's name-confidence rules ("[Company] team" below high
+confidence). The "book a demo through the page" close refers to the product page
+already linked — it adds no second URL (link strategy above holds: one link).
 
-### Messenger DM (messenger bucket)
+### Messenger DM (messenger bucket) - fully deterministic, no model call
 ```
-Hey! I'm giving 5 duct cleaning companies a free 10-day run of Nestaro, an AI assistant that answers your page messages in seconds, day or night. It checks customers are real[, around [city]], quotes your real prices, and books them into open slots on your calendar. You just get the finished lead. I set it all up for you. Want one of the 5 spots? (My work: x.com/iamanusbutt)
+Hey! I'm giving 5 duct cleaning companies a free 10-day run of Duct Lead Qualifier, an AI assistant that answers your page messages in seconds, day or night. It checks customers are real[, around [city]], quotes your real prices, and books them into open slots on your calendar. You just get the finished lead. I set it all up for you. Want one of the 5 spots? (See it working: https://www.omniveer.com/duct-lead-qualifier)
 ```
 
 ## 9. Success criteria
@@ -149,14 +173,14 @@ Hey! I'm giving 5 duct cleaning companies a free 10-day run of Nestaro, an AI as
 - Feeds a raw company list, returns an Obsidian vault of paste-ready, personalized drafts.
 - Names used only when confidence is high; nothing fabricated.
 - Duplicates caught; messenger-only companies sorted and given DM drafts.
-- The Facebook pitch is only used when open-web signals support it; otherwise the draft is channel-agnostic. Ad-running is never claimed or assumed.
+- Claims about the prospect's own channels appear only when open-web signals support them — the current email copy makes none (channel-neutral at every signal level). Ad-running is never claimed or assumed.
 - Re-running is safe (idempotent, non-destructive).
 - Build stayed in scope: no sender, no FB scraping, no web UI.
 - Sourcing (§10): from a keyword + metro list, produces a deduped candidate CSV filtered to pixel-positive companies, in the §6 input format, without ever contacting a Facebook host — and `ad_signal` never appears as a claim in any draft.
 
 ## 10. Company sourcing (`prospector source`)
 
-**Why:** the outreach in §8 offers free setup of the **Lead Qualifier agent** — an assistant that answers incoming leads instantly, qualifies them, books the good ones into a dashboard, and notifies the owner. Its best first users are duct-cleaning companies already paying for Meta ads (they have lead flow worth qualifying). §§1–9 assume a list already exists; this stage builds that list.
+**Why:** the outreach in §8 offers free setup of **Duct Lead Qualifier** (Omniveer) — an assistant that answers incoming leads instantly, qualifies them, books the good ones into a dashboard, and notifies the owner. Its best first users are duct-cleaning companies already paying for Meta ads (they have lead flow worth qualifying). §§1–9 assume a list already exists; this stage builds that list.
 
 **What it does:**
 
@@ -174,7 +198,7 @@ Hey! I'm giving 5 duct cleaning companies a free 10-day run of Nestaro, an AI as
 
 ## 11. Approved send (`prospector send`)
 
-**Why:** at real outreach volume (up to ~100/day) sending each drafted note by hand is impractical, and hand-tracking what was sent invites double-sends. This stage delivers **only** notes a human has explicitly approved, under hard guardrails (Constitution v3.0.0, Principle I). The human is still the sole approver; the tool is only the hands.
+**Why:** at real outreach volume (up to ~100/day) sending each drafted note by hand is impractical, and hand-tracking what was sent invites double-sends. This stage delivers **only** notes a human has explicitly approved, under hard guardrails (Constitution v4.0.0, Principle I). The human is still the sole approver; the tool is only the hands.
 
 **Status lifecycle:** the human reviews a draft in Obsidian and sets its frontmatter `status:` to `approved`. `prospector send` then performs the single machine-owned transition `approved → sent` (with a dated `## Log` line). Every other status stays human-owned.
 
@@ -186,13 +210,18 @@ draft / to-send ──(human sets)──▶ approved ──(prospector send --se
 **What it does:**
 
 - **Select** — scan the vault for `status: approved`, email-channel notes with a valid recipient and a `## Draft` subject + body. Anything else is skipped and reported (never guessed).
-- **Guard the account** — send only via the **Gmail API** from the dedicated Nestaro account (`PROSPECTOR_SEND_FROM`, default `nestaroassistant@gmail.com`). The tool resolves the authorized account and **refuses to send** if it is anything else — never the operator's personal account.
+- **Guard the account** — send only through the configured provider (`PROSPECTOR_SEND_PROVIDER`: the **Gmail API** or **authenticated SMTP**, e.g. a Zoho custom-domain mailbox) from the dedicated outreach mailbox (`PROSPECTOR_SEND_FROM` — required; for Omniveer outreach: `anas@omniveer.com`). Before any send the tool resolves the authenticated identity (Gmail: the OAuth account; SMTP: the login username) and **refuses to send** if it does not match `PROSPECTOR_SEND_FROM` — never the operator's personal account, never a spoofed From address.
 - **Cap (ramped)** — a configurable weekly ramp (`PROSPECTOR_SEND_CAPS`, default `15,30,60,100`; last value = week 4+), anchored on the first send recorded in the ledger. Today's allowance = cap − sends already logged today; the excess stay `approved` for a later day.
 - **Pace** — real sends are spaced by a randomized delay (`PROSPECTOR_SEND_DELAY`, default `30–90s`) to mimic human sending and protect deliverability. Dry-run adds no delay.
 - **Dry-run by default** — with no `--send`, nothing is sent, no status changes, no ledger write; the tool previews what it *would* send. Real sends require the explicit `--send` flag.
-- **Ledger** — an append-only `send_ledger.jsonl` (gitignored) records recipient, note slug, timestamp, Gmail message id, and result. It is the authoritative daily count and the double-send guard (a recipient/slug already sent is never sent again). Resumable after interruption.
+- **Ledger** — an append-only `send_ledger.jsonl` (gitignored) records recipient, note slug, timestamp, provider message id (Gmail id or SMTP Message-ID), and result. It is the authoritative daily count and the double-send guard (a recipient/slug already sent is never sent again). Resumable after interruption.
 - **Failure isolation** — a failed send leaves the note `approved`, logs the error, and the run continues; a failure never marks a note `sent`.
 
-**Requirements & limits:** a one-time Google OAuth consent (Desktop client in `secrets/`, gitignored) authorizes the Nestaro account with least-privilege scopes (`gmail.send` + email address for the identity check). A free Gmail account cannot publish SPF/DKIM/DMARC, so warm it up and expect the realistic daily cap to plateau below 100 regardless of the schedule.
+**Providers (feature 004):** sending goes through a provider-neutral transport selected by `PROSPECTOR_SEND_PROVIDER`:
 
-**Non-goals:** no personal-account sending, no non-email channel (no Messenger send), no bulk/unapproved/over-cap send, no transactional-ESP or general-purpose sender, no open/click tracking.
+- **`gmail`** — the original Gmail API path (feature 003, kept for backward compatibility): one-time Google OAuth consent (Desktop client in `secrets/`, gitignored) with least-privilege scopes (`gmail.send` + email address for the identity check). A free Gmail account cannot publish SPF/DKIM/DMARC, so warm it up and expect the realistic daily cap to plateau below 100 regardless of the schedule.
+- **`smtp`** — authenticated SMTP to a custom-domain mailbox (e.g. Zoho Mail for `anas@omniveer.com`): implicit SSL (465) or STARTTLS (587), password from the environment only (never logged, never committed). A custom domain can publish SPF/DKIM/DMARC, which is the deliverability upgrade motivating this provider. The From identity must equal the authenticated SMTP username — arbitrary From spoofing is refused.
+
+Dry-run performs **no** authentication and opens **no** connection under either provider.
+
+**Non-goals:** no personal-account sending, no non-email channel (no Messenger send), no bulk/unapproved/over-cap send, no transactional-ESP or general-purpose sender, no open/click tracking, no From-alias allowlist (a future feature may add one; until then From == authenticated identity, always).

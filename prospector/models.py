@@ -104,6 +104,57 @@ class Draft:
     model: str
     validated: bool = True
     validation_errors: list[str] = field(default_factory=list)
+    # 006: which path produced this copy — "agent" (model-written, cited and
+    # validated) or "template" (locked deterministic fallback). Defaults to
+    # template so every pre-006 construction site keeps its existing meaning.
+    source: str = "template"
+    # 006: citations per body paragraph, in order. Retained after validation so
+    # the operator can audit WHICH record each claim rests on — the validator
+    # can only prove a cited record exists, never that it supports the
+    # sentence, and that second check is the human's (SC-302). Empty on the
+    # template path, which makes no per-paragraph claims.
+    citations: list[list[str]] = field(default_factory=list)
+
+
+# --- Agentic drafting (006) -------------------------------------------------
+# The model writes prose but never facts: each block declares the evidence it
+# rests on, and a deterministic validator resolves every citation before the
+# copy reaches a note (Constitution v5.0.0 Principle IV).
+
+OFFER_CITE = "offer"  # reserved id: offer/product/sender facts, not a prospect claim
+
+
+@dataclass
+class EvidenceRef:
+    """A stable, citable handle on one Evidence record (data-model.md).
+
+    Derived fresh each run, never persisted. `id` is `<kind>_<ordinal>` so a
+    citation is readable by the operator at review time and identical across
+    runs with identical research (byte-idempotency, FR-329)."""
+
+    id: str
+    kind: str
+    value: str
+    source: str
+    excerpt: str = ""
+
+
+@dataclass
+class DraftBlock:
+    """One paragraph of model-written prose plus its supporting citations.
+
+    The unit of validation: accepted or rejected whole, never edited by code."""
+
+    text: str
+    cites: list[str] = field(default_factory=list)
+
+
+@dataclass
+class AgentResponse:
+    """The parsed model reply, before assembly and validation."""
+
+    subject: str
+    blocks: list[DraftBlock] = field(default_factory=list)
 
 
 class SendOutcome(str, Enum):
@@ -206,6 +257,11 @@ class RunSummary:
     duplicates: int = 0
     needs_review: int = 0
     per_company: list[tuple[str, str, str]] = field(default_factory=list)  # (slug, outcome, detail)
+    # 006 drafting-path visibility (FR-320). These need NOT sum to `processed`:
+    # messenger notes, --no-llm runs, and frozen notes are drafted by neither path.
+    drafted_agent: int = 0
+    drafted_template: int = 0
+    fallback_reasons: list[tuple[str, str]] = field(default_factory=list)  # (slug, reason)
 
     def reconciles(self) -> bool:
         return self.total == self.processed + self.failed

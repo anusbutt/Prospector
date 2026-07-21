@@ -1,9 +1,11 @@
-"""Approved-send pipeline (contracts/send-command.md, data-model.md).
+"""Approved-send pipeline (003 contracts/send-command.md; 004 contracts/email-sender.md).
 
 Selects `status: approved` notes, enforces the ramped daily cap against the
-ledger, paces real sends, sends via Gmail, flips delivered notes to `sent`, and
-records every send. Dry-run is the caller's default; identity verification lives
-in the CLI wrapper (only verified creds reach `run_send`).
+ledger, paces real sends, delivers through the provider-neutral EmailSender
+(Gmail API or authenticated SMTP — this module never imports a concrete
+provider), flips delivered notes to `sent`, and records every send. Dry-run is
+the caller's default and constructs no sender; identity verification lives in
+the CLI wrapper (only verified senders reach `run_send`).
 """
 
 import random
@@ -11,7 +13,7 @@ import time
 from datetime import date, datetime
 from pathlib import Path
 
-from prospector import gmail, ledger, vault
+from prospector import ledger, vault
 from prospector.config import Settings
 from prospector.models import (
     LedgerRecord,
@@ -23,29 +25,30 @@ from prospector.models import (
 
 
 class IdentityError(Exception):
-    """Raised when the authorized account is not the configured Nestaro sender."""
+    """Raised when the authenticated identity is not the configured sender."""
 
     def __init__(self, actual: str, expected: str):
         self.actual = actual
         self.expected = expected
         super().__init__(
-            f"refusing to send: authorized account {actual!r} is not the configured "
+            f"refusing to send: authenticated account {actual!r} is not the configured "
             f"send_from {expected!r} (never send from the personal account)"
         )
 
 
-def authorize_and_verify(settings: Settings, *, load=None, whoami=None):
-    """Load/authorize Gmail creds and verify the account is `settings.send_from`.
+def verified_sender(settings: Settings, *, sender=None):
+    """Build the configured provider's sender and verify its authenticated
+    identity equals `settings.send_from` case-insensitively (003 FR-004 /
+    004 FR-107). Raises IdentityError on mismatch — nothing is sent.
+    `sender` is injectable for tests (no real consent/login/network)."""
+    if sender is None:
+        from prospector import transport
 
-    Raises IdentityError on mismatch (FR-004). `load`/`whoami` are injectable for
-    tests so no real consent/network is needed."""
-    load = load or gmail.load_or_authorize
-    whoami = whoami or gmail.account_email
-    creds = load(settings.gmail_client_secret_path, settings.gmail_token_path)
-    account = whoami(creds)
-    if (account or "").strip().lower() != settings.send_from.strip().lower():
+        sender = transport.create_sender(settings)
+    account = sender.verify_identity()
+    if (account or "").strip().lower() != (settings.send_from or "").strip().lower():
         raise IdentityError(account, settings.send_from)
-    return creds
+    return sender
 
 
 class CapSchedule:
@@ -116,13 +119,15 @@ def run_send(
     vault_dir: str | Path | None = None,
     dry_run: bool = True,
     limit: int | None = None,
-    creds=None,
+    sender=None,
     sleep=time.sleep,
     rng: random.Random | None = None,
     today: date | None = None,
 ) -> RunReport:
-    """Core send pipeline. `creds` may be None in dry-run. Callers must have already
-    verified the sending identity before passing real creds (see CLI wrapper)."""
+    """Core send pipeline. `sender` is an EmailSender; it is None in dry-run
+    (dry-run authenticates nothing and opens no connection). Callers must have
+    already verified the sending identity before passing a real sender (see
+    CLI wrapper / `verified_sender`)."""
     rng = rng or random.Random()
     today = today or date.today()
     vault_dir = Path(vault_dir or settings.vault_dir)
@@ -180,7 +185,7 @@ def run_send(
     for i, cand in enumerate(to_send):
         rec_norm = cand.recipient.strip().lower()
         try:
-            message_id = gmail.send_message(creds, from_addr, cand.recipient, cand.subject, cand.body)
+            message_id = sender.send_message(from_addr, cand.recipient, cand.subject, cand.body)
         except Exception as exc:  # failure isolation (FR-011): log, keep approved, continue
             ledger.append(
                 ledger_path,
@@ -200,7 +205,9 @@ def run_send(
             ),
         )
         vault.set_status(
-            cand.note_path, "sent", f"{today.isoformat()} sent via prospector (gmail {message_id})"
+            cand.note_path,
+            "sent",
+            f"{today.isoformat()} sent via prospector ({settings.send_provider} {message_id})",
         )
         report.results.append(SendResult(cand.slug, cand.recipient, SendOutcome.SENT, message_id))
         if i < len(to_send) - 1:  # pace between sends, not after the last

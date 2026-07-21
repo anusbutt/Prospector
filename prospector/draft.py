@@ -2,7 +2,7 @@
 company returning slot JSON only, deterministic assembly, then validation.
 
 The LLM never sees or rewrites template prose (FR-015). It receives already-
-gated slot inputs and returns {greeting_name, hook_phrase, subject_company}.
+gated slot inputs and returns {greeting_name, subject_company}.
 Honesty is enforced by the validator, not hoped for (Constitution IV/V).
 """
 
@@ -12,7 +12,7 @@ import re
 import httpx
 
 from prospector.config import Settings
-from prospector.models import Draft, Prospect, Variant
+from prospector.models import Draft, Prospect
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -21,106 +21,106 @@ GENERIC_INBOX_PREFIXES = {
     "team", "service", "bookings", "mail", "inquiries", "enquiries",
 }
 
-SIGNATURE = "Anas\nx.com/iamanusbutt\nlinkedin.com/in/anus-yousuf"
+# Founder-led, compact sign-off (PRODUCT.md §8, rev. 2 2026-07-17). The
+# LinkedIn company link is deliberately omitted: it may only appear "when
+# appropriate" and must never be forced into every email — a mechanical
+# template cannot judge that, so the locked prose leaves it out (005 FR-204).
+SIGNATURE = "Anas\nFounder, Omniveer"
 
-OPENER_GENERIC = (
-    "Straight to it, and if this isn't your department, "
-    "please forward it to whoever handles your bookings."
-)
-OPENER_DIRECT = "Straight to it."
+# Link strategy (PRODUCT.md §8, 005 FR-202..205): exactly ONE promotional link
+# per body — the product page (it hosts the explanation and the demo, so no
+# separate video link and no attachment). Homepage is for Omniveer-broad
+# messages only and never combined with the product link. No booking link
+# unless one is explicitly configured later.
+PRODUCT_URL = "https://www.omniveer.com/duct-lead-qualifier"
+COMPANY_URL = "https://www.omniveer.com"
+LINKEDIN_COMPANY_URL = "https://www.linkedin.com/company/omniveer/"
 
-SUBJECT_TEMPLATE = "free setup for {subject_company}, you keep the bookings"
+SUBJECT_TEMPLATE = "Free 10-day pilot for {subject_company}"
 
-# Offer (PRODUCT.md §8, updated 2026-07-14): Nestaro, free 10-day run for
-# 5 duct-cleaning companies, set up entirely by Anas. The agnostic variant
-# differs from the FB variant only in how paragraph two opens: product-fact
-# ("Nestaro lives in your Facebook page inbox") vs their-activity ("When
-# someone messages your page") — constitution v2.0.0 Principle V.
+# Offer (PRODUCT.md §8, rev. 2 2026-07-17, operator-supplied copy): the
+# Omniveer Duct Lead Qualifier, free 10-day pilot for 5 duct-cleaning
+# companies. The copy is CHANNEL-NEUTRAL — it makes no claim about the
+# prospect's channels (or Facebook at all), so both fb_signal levels share
+# this one body and the §7.5 honesty gate is trivially satisfied (Principle V,
+# v4.0.1: defaulting down is always allowed; the signal is still recorded).
+# Ends with the single promotional link (the product page carries the demo)
+# and a low-pressure close — no urgency, no guarantees. "Book a demo through
+# the page" refers to the page already linked: no second URL.
 EMAIL_OFFER_PARAGRAPH = (
-    "I'm giving 5 duct cleaning companies a free 10-day run of Nestaro, "
-    "an AI assistant that answers your Facebook page messages for you. "
-    "I set everything up; it costs you nothing for the ten days."
+    "I'm giving 5 duct-cleaning companies a free 10-day pilot of the "
+    "Omniveer Duct Lead Qualifier."
 )
 
-EMAIL_BODY_TAIL = """quotes your real prices (it never invents a number), and books them into a genuinely open slot on your calendar. You get the finished lead by email: name, phone, address, service, and time. Anything it shouldn't answer gets flagged to you instead of guessed.
+EMAIL_TEMPLATE = (
+    """Hi {greeting},
 
-Five spots, first come. Reply here and I'll have yours running this week.
+"""
+    + EMAIL_OFFER_PARAGRAPH
+    + """
+
+It responds to new leads, qualifies them, books appointments when they're ready, sends the full details to your email, and keeps every lead organized in a dashboard.
+
+You can see the short demo here:
+"""
+    + PRODUCT_URL
+    + """
+
+Reply to this email if you'd like one of the five pilot spots, or book a demo through the page.
 
 {signature}"""
-
-EMAIL_FB_TEMPLATE = (
-    """Hi {greeting},
-
-{opener}
-
-"""
-    + EMAIL_OFFER_PARAGRAPH
-    + """
-
-Here's what it does. When someone messages your page, it replies in seconds, day or night, in a normal human voice. It checks they're {hook_phrase}, """
-    + EMAIL_BODY_TAIL
-)
-
-EMAIL_AGNOSTIC_TEMPLATE = (
-    """Hi {greeting},
-
-{opener}
-
-"""
-    + EMAIL_OFFER_PARAGRAPH
-    + """
-
-Here's what it does. Nestaro lives in your Facebook page inbox: when a customer messages, it replies in seconds, day or night, in a normal human voice. It checks they're {hook_phrase}, """
-    + EMAIL_BODY_TAIL
 )
 
 MESSENGER_DM_TEMPLATE = (
-    "Hey! I'm giving 5 duct cleaning companies a free 10-day run of Nestaro, "
-    "an AI assistant that answers your page messages in seconds, day or night. "
-    "It checks customers are real{city_clause}, quotes your real prices, and "
-    "books them into open slots on your calendar. You just get the finished "
-    "lead. I set it all up for you. Want one of the 5 spots? "
-    "(My work: x.com/iamanusbutt)"
+    "Hey! I'm giving 5 duct cleaning companies a free 10-day pilot of the "
+    "Omniveer Duct Lead Qualifier. It answers your page messages in seconds, "
+    "day or night. It checks customers are real{city_clause}, quotes your real "
+    "prices, and books them into open slots on your calendar. You just get the "
+    "finished lead. I set it all up for you. Want one of the 5 spots? "
+    "(See it working: " + PRODUCT_URL + ")"
 )
 
 # Invariant template prose that must survive assembly byte-for-byte (FR-015)
-AGNOSTIC_INVARIANTS = (
+EMAIL_INVARIANTS = (
     EMAIL_OFFER_PARAGRAPH,
-    "Here's what it does. Nestaro lives in your Facebook page inbox: when a customer messages, it replies in seconds, day or night, in a normal human voice.",
-    "quotes your real prices (it never invents a number), and books them into a genuinely open slot on your calendar.",
-    "Five spots, first come. Reply here and I'll have yours running this week.",
-)
-
-FB_INVARIANTS = (
-    EMAIL_OFFER_PARAGRAPH,
-    "Here's what it does. When someone messages your page, it replies in seconds, day or night, in a normal human voice.",
-    "quotes your real prices (it never invents a number), and books them into a genuinely open slot on your calendar.",
-    "Five spots, first come. Reply here and I'll have yours running this week.",
+    "It responds to new leads, qualifies them, books appointments when they're ready, sends the full details to your email, and keeps every lead organized in a dashboard.",
+    "You can see the short demo here:\n" + PRODUCT_URL,
+    "Reply to this email if you'd like one of the five pilot spots, or book a demo through the page.",
 )
 
 MESSENGER_INVARIANTS = (
-    "Hey! I'm giving 5 duct cleaning companies a free 10-day run of Nestaro,",
+    "Hey! I'm giving 5 duct cleaning companies a free 10-day pilot of the Omniveer Duct Lead Qualifier.",
     "quotes your real prices, and books them into open slots on your calendar.",
-    "Want one of the 5 spots? (My work: x.com/iamanusbutt)",
+    "Want one of the 5 spots? (See it working: " + PRODUCT_URL + ")",
 )
 
 # Ad-running is never observable and never claimed (Constitution V)
 AD_CLAIM_SUBSTRINGS = ("your ads", "ad campaign", "running ads", "advertis", "your facebook ads", "ad spend")
 
-DEFAULT_HOOK_PHRASE = "in your service area"
-
-SYSTEM_PROMPT = """You fill three slots for a locked outreach email template. Reply with a JSON object only:
-{"greeting_name": ..., "hook_phrase": ..., "subject_company": ...}
+SYSTEM_PROMPT = """You fill two slots for a locked outreach email template. Reply with a JSON object only:
+{"greeting_name": ..., "subject_company": ...}
 
 Rules (violations are rejected by a validator):
 - greeting_name: repeat the provided name_or_team value EXACTLY. Never substitute another name.
-- hook_phrase: a short locator phrase for mid-sentence use, e.g. "in your service area" or "around Boston". Start with "in" or "around". Max 8 words. Base it ONLY on the provided hook/city values; if they are empty, use "in your service area". Never invent facts.
 - subject_company: a natural short form of the provided company name for a subject line. Only drop words (like LLC or Cleaning); never add or change words.
 No other keys. No prose."""
 
 
 class DraftError(Exception):
     """OpenRouter call failed; company is flagged, batch continues."""
+
+
+# Curly apostrophes are common in scraped company names ("Drew’s"), and a model
+# almost always answers with the straight form ("Drew's"). Splitting on a
+# straight-quote-only class made those two tokenize differently — "drew"+"s"
+# versus "drew's" — so a correct subject was rejected as invented. Normalize the
+# quote and drop it from tokens so both spellings agree.
+_CURLY_QUOTES = str.maketrans({"’": "'", "‘": "'", "ʼ": "'"})
+
+
+def name_tokens(text: str) -> set[str]:
+    """Apostrophe-insensitive word tokens, for company/subject comparison."""
+    return {t for t in re.split(r"[^a-z0-9]+", text.translate(_CURLY_QUOTES).lower()) if t}
 
 
 def _strip_code_fences(content: str) -> str:
@@ -189,16 +189,15 @@ def request_slots(prospect: Prospect, settings: Settings) -> dict:
 
 
 def assemble_email(prospect: Prospect, slots: dict) -> Draft:
-    """Deterministic assembly from template constants + validated slot fills."""
+    """Deterministic assembly from template constants + validated slot fills.
+
+    Rev. 2 (2026-07-17): one channel-neutral template for every fb_signal
+    level — the copy makes no claims about the prospect's channels, so the
+    §7.5 gate is trivially satisfied (the signal is still recorded)."""
     greeting = str(slots.get("greeting_name", "")).strip()
-    hook_phrase = str(slots.get("hook_phrase", "")).strip() or DEFAULT_HOOK_PHRASE
     subject_company = str(slots.get("subject_company", "")).strip() or prospect.company.company
 
-    opener = OPENER_GENERIC if is_generic_inbox(prospect.company.email) else OPENER_DIRECT
-    template = EMAIL_FB_TEMPLATE if prospect.variant is Variant.EMAIL_FB else EMAIL_AGNOSTIC_TEMPLATE
-    body = template.format(
-        greeting=greeting, opener=opener, hook_phrase=hook_phrase, signature=SIGNATURE
-    )
+    body = EMAIL_TEMPLATE.format(greeting=greeting, signature=SIGNATURE)
     subject = SUBJECT_TEMPLATE.format(subject_company=subject_company)
     errors = validate_email_draft(subject, body, prospect, slots)
     return Draft(subject=subject, body=body, model="", validated=not errors, validation_errors=errors)
@@ -217,6 +216,12 @@ def build_messenger_draft(prospect: Prospect) -> Draft:
     for banned in AD_CLAIM_SUBSTRINGS:
         if banned in body.lower():
             errors.append(f"ad-running claim detected: {banned!r}")
+    # Link strategy (005): one promotional link — the product page — and never
+    # LinkedIn in the pitch. Same rules as the email validator.
+    if body.count("http") != 1 or PRODUCT_URL not in body:
+        errors.append("body must carry exactly one promotional link (the product page)")
+    if "linkedin.com" in body.lower():
+        errors.append("LinkedIn link may not appear in the pitch")
     return Draft(subject=None, body=body, model="deterministic", validated=not errors, validation_errors=errors)
 
 
@@ -227,8 +232,7 @@ def validate_email_draft(subject: str, body: str, prospect: Prospect, slots: dic
     if re.search(r"\[[^\]\n]{1,60}\]", body) or re.search(r"\[[^\]\n]{1,60}\]", subject):
         errors.append("unfilled [slot] remains")
 
-    invariants = FB_INVARIANTS if prospect.variant is Variant.EMAIL_FB else AGNOSTIC_INVARIANTS
-    for line in invariants:
+    for line in EMAIL_INVARIANTS:
         if line not in body:
             errors.append(f"template prose altered: missing {line[:40]!r}...")
 
@@ -236,15 +240,22 @@ def validate_email_draft(subject: str, body: str, prospect: Prospect, slots: dic
         if banned in lowered or banned in subject.lower():
             errors.append(f"ad-running claim detected: {banned!r}")
 
+    # Link strategy (005 FR-202..205): exactly one promotional link — the
+    # product page (demo lives there). This structurally blocks a homepage+
+    # product combo, second/video/booking links, and any link a slot smuggles in.
+    if body.count("http") != 1 or PRODUCT_URL not in body:
+        errors.append("body must carry exactly one promotional link (the product page)")
+    if "linkedin.com" in lowered:
+        errors.append("LinkedIn link may not appear in the pitch")
+
     if not body.rstrip().endswith(SIGNATURE):
         errors.append("signature altered or missing")
 
-    # Constitution v2.0.0 Principle V: product-fact Facebook mentions are fine
-    # in every variant; claims about the PROSPECT's page activity belong only
-    # to the strong-signal variant — enforced structurally by template choice
-    # (the agnostic variant contains no their-activity phrasing to alter).
-    if prospect.variant is not Variant.EMAIL_FB and "messages your page" in lowered:
-        errors.append("their-page-activity phrasing in a non-strong variant")
+    # Constitution Principle V: the rev.-2 template is channel-neutral — no
+    # claim about the prospect's channels may appear at ANY signal level, so
+    # their-activity phrasing sneaking in via a slot is always rejected.
+    if "messages your page" in lowered:
+        errors.append("their-page-activity phrasing in the channel-neutral template")
 
     expected = expected_greeting(prospect)
     if not body.startswith(f"Hi {expected},"):
@@ -263,15 +274,9 @@ def validate_email_draft(subject: str, body: str, prospect: Prospect, slots: dic
         if prospect.name_used.lower() not in sourced:
             errors.append("greeting name does not trace to a recorded source")
 
-    hook_phrase = str(slots.get("hook_phrase", "")).strip() or DEFAULT_HOOK_PHRASE
-    if len(hook_phrase) > 60 or "\n" in hook_phrase or "http" in hook_phrase or "—" in hook_phrase:
-        errors.append("hook_phrase malformed")
-    elif not hook_phrase.lower().startswith(("in ", "around ")):
-        errors.append("hook_phrase must start with 'in' or 'around'")
-
     subject_company = str(slots.get("subject_company", "")).strip() or prospect.company.company
-    company_tokens = {t for t in re.split(r"[^a-z0-9']+", prospect.company.company.lower()) if t}
-    subject_tokens = [t for t in re.split(r"[^a-z0-9']+", subject_company.lower()) if t]
+    company_tokens = name_tokens(prospect.company.company)
+    subject_tokens = [t for t in name_tokens(subject_company)]
     if not subject_tokens or any(t not in company_tokens for t in subject_tokens):
         errors.append("subject_company contains words not in the company name")
 

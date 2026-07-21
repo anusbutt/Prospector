@@ -23,11 +23,33 @@ These are hard constraints enforced in code and tests, not aspirations
 
 | # | Guarantee | How it's enforced |
 |---|-----------|-------------------|
-| 1 | **Sends only what a human approved** | The pipeline drafts; `prospector send` delivers **only** notes marked `status: approved`, dry-run by default (real sends need `--send`), Gmail API only from the dedicated Nestaro account (never a personal account), under a ramped daily cap, with an append-only ledger that prevents double-sends. It never auto-approves, never sends off-channel, and never exceeds the cap. |
+| 1 | **Sends only what a human approved** | The pipeline drafts; `prospector send` delivers **only** notes marked `status: approved`, dry-run by default (real sends need `--send`), exclusively from the configured dedicated outreach mailbox via one of two guarded transports — the Gmail API or authenticated SMTP (e.g. Zoho) — never a personal account and never a From address that differs from the authenticated identity. All under a ramped daily cap, with an append-only ledger that prevents double-sends. It never auto-approves, never sends off-channel, and never exceeds the cap. |
 | 2 | **Never touches Facebook** | Every outbound request passes through one HTTP choke point that raises on `facebook.com`, `fb.com`, `fb.me`, `fbcdn.net`, and `messenger.com` before any network activity. A `facebook_url` input is stored as a signal and never fetched. |
-| 3 | **Never fabricates a name** | A real first name appears in a draft only at high confidence, and only when it traces to a recorded source (a page URL and excerpt). A validator rejects any unsourced name, even if the LLM produces one. |
-| 4 | **Never claims what it can't observe** | Ad-running is never claimed or implied. Statements about the *prospect's own* Facebook activity appear only when observed open-web signals support them (uncertain signals always rank *down*); describing the offered product's Facebook capability is a product fact, not a claim about the prospect. |
-| 5 | **No web UI** | The Obsidian vault *is* the interface. |
+| 3 | **Never fabricates a name** | A real first name appears in a draft only at high confidence, and only when it traces to a recorded source (a page URL and excerpt). The model is never even asked for the name: the greeting is assembled in code from the scored evidence, so a fabricated name has no way in. |
+| 4 | **Every claim about the prospect cites its source** | The model writes the prose, but each paragraph must name the research record it rests on, and a deterministic validator resolves every citation against records actually captured for *that* company. Uncited copy, or a citation that doesn't resolve, is rejected and the locked template answers instead. Product and offer facts cite a reserved `offer` id — and a block citing only `offer` may not mention the prospect, which closes the obvious loophole. |
+| 5 | **Never claims what it can't observe** | Ad-running is never claimed or implied. Statements about the *prospect's own* Facebook activity appear only when observed open-web signals support them and the draft cites them (uncertain signals always rank *down*); describing the offered product's Facebook capability is a product fact, not a claim about the prospect. |
+| 6 | **No web UI** | The Obsidian vault *is* the interface. |
+
+## Architecture at a glance
+
+![Prospector architecture](docs/architecture.png)
+
+Three machines on a conveyor belt, and the belt is the Obsidian vault:
+
+- **Machine 1 — research** finds what's true and writes it into a note, with a
+  source attached to every fact.
+- **Machine 2 — draft** reads those facts, writes personalized prose, and a
+  **validator rejects any sentence that can't cite its source** — falling back
+  to a locked template rather than shipping an unverifiable claim.
+- **Machine 3 — send** picks up only the notes a human marked `approved` and
+  mails them, recording every send in an append-only ledger.
+
+The machines never talk to each other directly — they only read and write the
+vault. **The human is a stage in the belt**, not a bystander: approval is a
+person changing one word (`to-send` → `approved`) inside a note. Every
+dangerous action is funnelled through a single guarded door — Facebook-blocking
+on fetch, citation on the draft, approval on the send — and a re-run refreshes
+the facts while freezing anything a human has touched.
 
 ## How it works
 
@@ -36,15 +58,16 @@ CSV / markdown list
       │
       ▼
 ingest ──► dedupe & bucket ──► resolve ──► fetch ──► extract ──► score ──► draft ──► vault
-                                (Places /   (polite,   (names,     (§ conf-  (locked    (one note per
-                                 DuckDuckGo)  FB-host    city, hook, idence +  templates, company +
-                                              blocked)   FB signals) fb_signal) 1 LLM call) dashboard)
+                                (Places /   (polite,   (names,     (§ conf-  (agent    (one note per
+                                 DuckDuckGo)  FB-host    city, hook, idence +  writes,   company +
+                                              blocked)   FB signals) fb_signal) cited +   dashboard)
+                                                                                validated)
       │
       ▼
-YOU review in Obsidian ──► set status: approved ──► prospector send ──► Gmail
-   (fix / approve / reject)      (your green light)     (dry-run default,   (from the
-                                                         cap + pace +        Nestaro
-                                                         ledger)             account)
+YOU review in Obsidian ──► set status: approved ──► prospector send ──► Gmail API / SMTP
+   (fix / approve / reject)      (your green light)     (dry-run default,   (from the dedicated
+                                                         cap + pace +        outreach mailbox,
+                                                         ledger)             e.g. Zoho)
 ```
 
 `prospector source` (optional) builds the input list; `prospector send` (optional)
@@ -67,11 +90,21 @@ delivers the approved drafts. The core `run` is everything in between.
 6. **Score** — name confidence and channel fit (see tables below). All scoring
    is plain, unit-tested Python. The LLM never makes a trust decision.
 7. **Draft** — one LLM call per company (OpenRouter, direct HTTP, no agent
-   framework). The model returns *slot values only* as strict JSON; the locked
-   template prose is assembled in code and cannot be paraphrased. A validator
-   then rejects unfilled slots, altered template text, unsourced names,
-   Facebook mentions without signal, and ad-running vocabulary. Messenger DMs
-   are fully deterministic — no LLM call at all.
+   framework, no tool use). The model is steered by four versioned markdown
+   files in `prospector/agent/` — who the sender is, what the offer is, the
+   hard rules, and how to write a cold email — and receives *only* the
+   extracted evidence records, never raw HTML. It returns a subject plus 3–6
+   prose blocks, **each declaring which evidence records support it**. Code
+   assembles the greeting (from the scored name, never the model), the blocks,
+   and the signature. A deterministic validator then resolves every citation
+   against records captured for that company and applies the honesty checks:
+   uncited claims, unresolvable citations, prospect facts smuggled into
+   offer-only blocks, ad-running vocabulary, a second link, and unsourced
+   names are all rejected. **Any rejection falls back to the locked template**,
+   which is unchanged and independently tested — so every company still gets an
+   honest draft. The note records `draft_source: agent|template`, and the run
+   summary reports the fallback rate so a broken drafting path is visible in
+   one batch. Messenger DMs stay fully deterministic — no LLM call at all.
 8. **Write vault** — one note per company plus a `_Dashboard.md` of Dataview
    queries. Re-runs are byte-idempotent and merge by section ownership: your
    `status` edits, `## Log` entries, and any sections you add are never
@@ -121,7 +154,13 @@ cp .env.example .env   # then add your keys
 | `OPENROUTER_MODEL` | No | Defaults to `anthropic/claude-sonnet-4.5` |
 | `GOOGLE_PLACES_API_KEY` | For `source` | `source` exits pre-flight (no fallback discovery); `run`'s website/city resolution falls back to DuckDuckGo only |
 | `HUNTER_API_KEY` | No | Email-name enrichment skipped (capped at medium confidence when present) |
-| `PROSPECTOR_SEND_FROM` | For `send` | Defaults to `nestaroassistant@gmail.com`; the tool refuses to send from any other account |
+| `PROSPECTOR_SEND_PROVIDER` | No | Send transport: `gmail` (default) or `smtp` |
+| `PROSPECTOR_SEND_FROM` | For `send` | Pre-flight error — set it to the dedicated outreach mailbox (e.g. `anas@omniveer.com`); the tool refuses to send from any other identity |
+| `PROSPECTOR_SEND_NAME` | No | From display name (`Anas from Omniveer <anas@omniveer.com>`); bare address when unset |
+| `PROSPECTOR_REPLY_TO` | No | `Reply-To` header omitted when unset |
+| `PROSPECTOR_SMTP_HOST` / `_USERNAME` / `_PASSWORD` | For `smtp` provider | Pre-flight error naming the missing variable (values never echoed) |
+| `PROSPECTOR_SMTP_SECURITY` | No | `ssl` (implicit TLS, default) or `starttls` |
+| `PROSPECTOR_SMTP_PORT` | No | Defaults to 465 (`ssl`) / 587 (`starttls`) |
 | `PROSPECTOR_SEND_CAPS` | No | Weekly daily-cap ramp; defaults to `15,30,60,100` (last value applies to week 4+) |
 | `PROSPECTOR_SEND_DELAY` | No | Randomized seconds between real sends; defaults to `30,90` |
 
@@ -218,6 +257,8 @@ angle: offer-led
 fb_signal: none
 duplicate_of:
 needs_review: false
+draft_source: agent          # agent | template — which path wrote this copy
+outcome:                     # human-owned: replied | interested | bounced | no
 tags: [outreach, duct-cleaning, prospector]
 ---
 
@@ -225,6 +266,13 @@ tags: [outreach, duct-cleaning, prospector]
 **Subject:** ...paste-ready subject...
 
 ...paste-ready body...
+
+## Citations
+*What each body paragraph rests on. The tool proves a cited record exists;
+only you can confirm it actually says what the sentence claims.*
+
+1. `hook_source_1` — "...serving the Denver area for 18 years..." (summitduct.example.com/about)
+2. `offer` — the offer, product, or sender (not a claim about them)
 
 ## Research
 - Owner name: not found (no /about page)
@@ -236,6 +284,14 @@ tags: [outreach, duct-cleaning, prospector]
 ## Log
 -
 ```
+
+On an **agent-written** note, a `## Citations` section maps each body paragraph
+to the research record it rests on — the interface for the one check the
+validator cannot perform (whether a real record actually *supports* a sentence,
+not merely that it exists). **Template-fallback notes have no Citations
+section**, since they make no per-paragraph claims. `draft_source` records which
+path ran; `outcome` is yours to fill in when a prospect replies, and the
+dashboard groups reply outcomes by drafting path so the two can be compared.
 
 `_Dashboard.md` provides live queues via the
 [Dataview](https://blacksmithgu.github.io/obsidian-dataview/) community plugin
@@ -260,23 +316,27 @@ Dataview, everything still works as plain markdown.
 ## Sending (optional): deliver approved drafts
 
 `prospector send` delivers the notes you have marked `status: approved` — and
-only those — as plain emails from a dedicated account. It is **dry-run by
-default**: with no flag it previews exactly what it would send and touches
-nothing. A real send requires `--send`.
+only those — as plain emails from a dedicated outreach mailbox, through one of
+two transports selected by `PROSPECTOR_SEND_PROVIDER`: the **Gmail API**
+(default, backward compatible) or **authenticated SMTP** (e.g. a Zoho
+custom-domain mailbox). It is **dry-run by default**: with no flag it previews
+exactly what it would send and touches nothing — no authentication, no
+connection, no external request. A real send requires `--send`.
 
 ```bash
 # after approving notes in Obsidian (status: approved):
-prospector send                     # DRY-RUN preview (sends nothing, changes nothing)
-prospector send --send              # actually send (first run does a one-time Google OAuth)
+prospector send                     # DRY-RUN preview (sends nothing, connects to nothing)
+prospector send --send              # actually send (gmail: first run does a one-time OAuth)
 prospector send --send --limit 5    # send at most 5 this run (still capped)
 prospector send --send --vault ~/Obsidian/Outreach
 ```
 
-Each real send, in order: verifies the authorized account is `PROSPECTOR_SEND_FROM`
-(and **refuses** otherwise — never a personal account), checks today's remaining
-allowance against the ramped cap, skips anyone already in the ledger, sends via the
-Gmail API, records a ledger line, flips the note to `status: sent`, then waits a
-randomized 30–90s before the next one.
+Each real send, in order: verifies the *authenticated* identity is
+`PROSPECTOR_SEND_FROM` (and **refuses** otherwise — never a personal account,
+never a spoofed From), checks today's remaining allowance against the ramped
+cap, skips anyone already in the ledger, delivers via the configured provider,
+records a ledger line with the provider's message id, flips the note to
+`status: sent`, then waits a randomized 30–90s before the next one.
 
 - **The ledger** (`send_ledger.jsonl`, append-only, gitignored) is the source of
   truth for the daily count and for **double-send prevention** — a recipient or
@@ -288,28 +348,58 @@ randomized 30–90s before the next one.
   logs the reason, and the run continues — nothing is silently dropped or double-sent.
 
 Exit codes for `send`: `0` completed (per-message failures are reported, not fatal),
-`1` pre-flight failure, `2` wrong account (nothing sent), `3` missing/failed OAuth.
+`1` pre-flight failure (including missing/invalid provider or SMTP configuration),
+`2` wrong account (nothing sent), `3` authentication failure (OAuth or SMTP login).
 
-**One-time setup:** a Google Cloud project with the Gmail API enabled and a Desktop
-OAuth client; put its client-secret JSON at `secrets/gmail_client_secret.json`. The
-first `--send` opens a browser consent (sign in as the Nestaro account); the token
-is then saved to `secrets/gmail_token.json` and reused. A free Gmail can't publish
-SPF/DKIM/DMARC, so warm the account up and expect the realistic cap to plateau below
-100 — deliverability, not the code, is the limiting factor.
+### SMTP setup (e.g. Zoho custom domain)
+
+A custom-domain mailbox can publish SPF/DKIM/DMARC — the deliverability upgrade
+a free Gmail account can't get. In `.env` (gitignored; the password is never
+logged and never committed):
+
+```bash
+PROSPECTOR_SEND_PROVIDER=smtp
+PROSPECTOR_SMTP_HOST=smtp.zoho.com
+PROSPECTOR_SMTP_SECURITY=ssl              # implicit TLS on 465 (or starttls on 587)
+PROSPECTOR_SMTP_USERNAME=anas@omniveer.com
+PROSPECTOR_SMTP_PASSWORD=<app-specific password>
+PROSPECTOR_SEND_FROM=anas@omniveer.com    # must equal the SMTP username (no spoofing)
+PROSPECTOR_SEND_NAME=Anas from Omniveer   # From: Anas from Omniveer <anas@omniveer.com>
+```
+
+Authentication is mandatory, TLS certificates are verified, and each message
+carries proper `From`/`Reply-To`/`Date`/`Message-ID` headers (the Message-ID is
+stored in the ledger). See
+[`specs/004-provider-transport/quickstart.md`](specs/004-provider-transport/quickstart.md)
+for the full walkthrough.
+
+### Gmail setup (default provider)
+
+A Google Cloud project with the Gmail API enabled and a Desktop OAuth client;
+put its client-secret JSON at `secrets/gmail_client_secret.json`. The first
+`--send` opens a browser consent (sign in as the dedicated outreach account —
+`PROSPECTOR_SEND_FROM` must match it); the token is then saved to
+`secrets/gmail_token.json` and reused. A free Gmail can't publish
+SPF/DKIM/DMARC, so warm the account up and expect the realistic cap to plateau
+below 100 — deliverability, not the code, is the limiting factor.
 
 ## Design notes
 
 - **Deterministic honesty core, LLM at the edge.** Everything that affects
-  trust — confidence scoring, signal classification, template selection,
-  validation — is plain Python with unit tests. The LLM's only job is phrasing
-  slot values, and even those are validated after the fact.
+  trust — confidence scoring, signal classification, and validation — is plain
+  Python with unit tests. The LLM writes the prose but decides nothing: it must
+  cite a recorded source for every claim, a deterministic validator resolves
+  each citation, and anything unverifiable is discarded in favour of a locked
+  template. The model gains freedom of phrasing, never freedom of fact.
 - **Spec-driven.** The project was built constitution → spec → plan → tasks →
   implementation; all artifacts are in [`specs/001-prospector-cli/`](specs/001-prospector-cli/)
   and the product intent in [`PRODUCT.md`](PRODUCT.md).
-- **Verification.** A 200-test offline suite (network and LLM stubbed at the
+- **Verification.** A ~500-test offline suite (network and LLM stubbed at the
   httpx-transport level) covers the pipeline, including transport-level proof
-  that no request ever reaches a Facebook host and golden tests that locked
-  template prose survives byte-for-byte. Validated live against real companies
+  that no request ever reaches a Facebook host, adversarial tests that every
+  uncited or laundered claim is rejected, and a proof that the locked-template
+  path is byte-for-byte unchanged by the agent work. Validated live against real
+  companies
   before release. The suite is kept out of this repository.
 
 ## Honest limitations
@@ -319,9 +409,11 @@ SPF/DKIM/DMARC, so warm the account up and expect the realistic cap to plateau b
   perfection. Everything below high confidence is flagged, never guessed.
 - Heuristics are tuned for US/English local-service businesses with simple
   websites. Enterprises, e-commerce, and non-English markets would need work.
-- The message templates encode one specific offer and voice. Adapting the tool
-  to another vertical means supplying your own templates (a planned
-  campaign-profile feature would make that configuration, not code).
+- The drafting voice and offer live in four Markdown files under
+  `prospector/agent/` (identity, offer, constraints, writing skill) plus one
+  locked-template fallback. Adapting the tool to another vertical means editing
+  that prose — no code change — though the extraction heuristics and the locked
+  template still assume the duct-cleaning offer.
 
 ## License
 
