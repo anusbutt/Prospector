@@ -1,212 +1,233 @@
 # Prospector
 
-**A CLI batch tool that turns a raw list of local service companies into an
-Obsidian vault of honest, personalized, paste-ready outreach drafts.**
+Prospector is a command-line research and outreach-drafting pipeline for local
+service businesses. It turns a CSV or Markdown company list into an Obsidian
+vault containing sourced research, personalized drafts, review queues, and an
+approval-controlled sending workflow.
 
-Cold outreach converts far better when each message carries the owner's first
-name and one specific, true hook. Producing that by hand across a list is slow,
-repetitive research: find the site, dig for a name, note the city, catch
-duplicate inboxes, sort out who has no email. Prospector automates the research
-and personalization — the expensive part — and then sends only the drafts **you
-approve**, from a dedicated account, under strict guardrails (dry-run by default,
-a ramped daily cap, and a ledger that prevents double-sends).
+The system is designed around human approval and verifiable claims. It never
+contacts Facebook, never invents a prospect's name, and never sends a message
+unless a user explicitly approves the corresponding note.
 
-Built for duct-cleaning outreach first; the pipeline itself is
-vertical-agnostic.
-
----
-
-## Guarantees
-
-These are hard constraints enforced in code and tests, not aspirations
-(see [`.specify/memory/constitution.md`](.specify/memory/constitution.md)):
-
-| # | Guarantee | How it's enforced |
-|---|-----------|-------------------|
-| 1 | **Sends only what a human approved** | The pipeline drafts; `prospector send` delivers **only** notes marked `status: approved`, dry-run by default (real sends need `--send`), exclusively from the configured dedicated outreach mailbox via one of two guarded transports — the Gmail API or authenticated SMTP (e.g. Zoho) — never a personal account and never a From address that differs from the authenticated identity. All under a ramped daily cap, with an append-only ledger that prevents double-sends. It never auto-approves, never sends off-channel, and never exceeds the cap. |
-| 2 | **Never touches Facebook** | Every outbound request passes through one HTTP choke point that raises on `facebook.com`, `fb.com`, `fb.me`, `fbcdn.net`, and `messenger.com` before any network activity. A `facebook_url` input is stored as a signal and never fetched. |
-| 3 | **Never fabricates a name** | A real first name appears in a draft only at high confidence, and only when it traces to a recorded source (a page URL and excerpt). The model is never even asked for the name: the greeting is assembled in code from the scored evidence, so a fabricated name has no way in. |
-| 4 | **Every claim about the prospect cites its source** | The model writes the prose, but each paragraph must name the research record it rests on, and a deterministic validator resolves every citation against records actually captured for *that* company. Uncited copy, or a citation that doesn't resolve, is rejected and the locked template answers instead. Product and offer facts cite a reserved `offer` id — and a block citing only `offer` may not mention the prospect, which closes the obvious loophole. |
-| 5 | **Never claims what it can't observe** | Ad-running is never claimed or implied. Statements about the *prospect's own* Facebook activity appear only when observed open-web signals support them and the draft cites them (uncertain signals always rank *down*); describing the offered product's Facebook capability is a product fact, not a claim about the prospect. |
-| 6 | **No web UI** | The Obsidian vault *is* the interface. |
-
-## Architecture at a glance
+> Prospector was initially built for duct-cleaning outreach, but the pipeline
+> can be adapted to other local-service verticals.
 
 ![Prospector architecture](docs/architecture.png)
 
-Three machines on a conveyor belt, and the belt is the Obsidian vault:
+## Contents
 
-- **Machine 1 — research** finds what's true and writes it into a note, with a
-  source attached to every fact.
-- **Machine 2 — draft** reads those facts, writes personalized prose, and a
-  **validator rejects any sentence that can't cite its source** — falling back
-  to a locked template rather than shipping an unverifiable claim.
-- **Machine 3 — send** picks up only the notes a human marked `approved` and
-  mails them, recording every send in an append-only ledger.
+- [Capabilities](#capabilities)
+- [Safety guarantees](#safety-guarantees)
+- [How it works](#how-it-works)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Usage](#usage)
+- [Input format](#input-format)
+- [Review workflow](#review-workflow)
+- [Sending approved drafts](#sending-approved-drafts)
+- [Output](#output)
+- [Design principles](#design-principles)
+- [Limitations](#limitations)
 
-The machines never talk to each other directly — they only read and write the
-vault. **The human is a stage in the belt**, not a bystander: approval is a
-person changing one word (`to-send` → `approved`) inside a note. Every
-dangerous action is funnelled through a single guarded door — Facebook-blocking
-on fetch, citation on the draft, approval on the send — and a re-run refreshes
-the facts while freezing anything a human has touched.
+## Capabilities
+
+- Ingest CSV files and Markdown tables.
+- Deduplicate shared inboxes and classify email and Messenger prospects.
+- Resolve missing websites through Google Places or DuckDuckGo.
+- Research public company pages with bounded retries, host pacing, and
+  `robots.txt` support.
+- Extract names, locations, hooks, and open-web Facebook signals with evidence.
+- Score evidence deterministically before it reaches the drafting model.
+- Produce cited drafts with a locked-template fallback.
+- Write one Markdown note per company and a Dataview-compatible dashboard.
+- Preserve human-owned content across repeated runs.
+- Deliver approved drafts through Gmail or authenticated SMTP with dry-run
+  defaults, daily caps, pacing, and duplicate-send protection.
+
+## Safety guarantees
+
+These constraints are enforced in code and tests. See
+[`.specify/memory/constitution.md`](.specify/memory/constitution.md) for the
+complete project principles.
+
+| Guarantee | Enforcement |
+| --- | --- |
+| Human approval is required | `prospector send` considers only notes with `status: approved`. It previews by default; real delivery requires `--send` and confirmation unless `--yes` is supplied. |
+| Facebook is never contacted | All outbound HTTP traffic passes through a guard that rejects Facebook and Messenger hosts before network activity. Facebook URLs are stored only as input signals. |
+| Names are never fabricated | Deterministic code extracts and scores names. Only high-confidence, source-backed names are used; the model does not choose the greeting. |
+| Prospect claims require evidence | Every agent-written prose block cites captured research records. A deterministic validator rejects missing or invalid citations. |
+| Unsupported claims are rejected | Invalid or unverifiable copy is rejected and replaced with a locked template. |
+| Sending is identity-bound | The authenticated identity must match the dedicated mailbox configured in `PROSPECTOR_SEND_FROM`. |
+| The vault is the interface | Research, drafts, approvals, and review queues remain in plain Markdown; there is no web application. |
 
 ## How it works
 
-```
-CSV / markdown list
-      │
-      ▼
-ingest ──► dedupe & bucket ──► resolve ──► fetch ──► extract ──► score ──► draft ──► vault
-                                (Places /   (polite,   (names,     (§ conf-  (agent    (one note per
-                                 DuckDuckGo)  FB-host    city, hook, idence +  writes,   company +
-                                              blocked)   FB signals) fb_signal) cited +   dashboard)
-                                                                                validated)
-      │
-      ▼
-YOU review in Obsidian ──► set status: approved ──► prospector send ──► Gmail API / SMTP
-   (fix / approve / reject)      (your green light)     (dry-run default,   (from the dedicated
-                                                         cap + pace +        outreach mailbox,
-                                                         ledger)             e.g. Zoho)
+```text
+Company list
+    |
+    v
+Ingest -> deduplicate -> resolve -> fetch -> extract -> score -> draft
+                                                               |
+                                                               v
+                                                        Obsidian vault
+                                                               |
+                                                     human review/approval
+                                                               |
+                                                               v
+                                                   Gmail API or SMTP
 ```
 
-`prospector source` (optional) builds the input list; `prospector send` (optional)
-delivers the approved drafts. The core `run` is everything in between.
+The pipeline has three operational stages:
 
-1. **Ingest & dedupe** — parses CSV or markdown tables, normalizes rows, and
-   detects shared inboxes (identical emails always group; shared custom domains
-   group; two unrelated businesses on gmail.com don't). One send per inbox.
-2. **Bucket** — a valid email routes to the email channel; a blank field, the
-   word `messenger`, or a Facebook URL in the email field routes to the
-   Messenger bucket (which gets a DM draft instead).
-3. **Resolve** — when no website is given: Google Places (if a key is
-   configured) with a DuckDuckGo HTML fallback, validated against the homepage.
-4. **Fetch** — homepage plus nav-discovered `/about`, `/team`, `/contact`
-   pages. Polite by design: bounded timeouts, ≤2 retries, per-host spacing,
-   robots.txt respected for subpages.
-5. **Extract** — deterministic (non-LLM) extraction of owner-name candidates,
-   city/service area, one personalization hook, and Facebook-usage signals —
-   each carrying its source URL and a text excerpt as evidence.
-6. **Score** — name confidence and channel fit (see tables below). All scoring
-   is plain, unit-tested Python. The LLM never makes a trust decision.
-7. **Draft** — one LLM call per company (OpenRouter, direct HTTP, no agent
-   framework, no tool use). The model is steered by four versioned markdown
-   files in `prospector/agent/` — who the sender is, what the offer is, the
-   hard rules, and how to write a cold email — and receives *only* the
-   extracted evidence records, never raw HTML. It returns a subject plus 3–6
-   prose blocks, **each declaring which evidence records support it**. Code
-   assembles the greeting (from the scored name, never the model), the blocks,
-   and the signature. A deterministic validator then resolves every citation
-   against records captured for that company and applies the honesty checks:
-   uncited claims, unresolvable citations, prospect facts smuggled into
-   offer-only blocks, ad-running vocabulary, a second link, and unsourced
-   names are all rejected. **Any rejection falls back to the locked template**,
-   which is unchanged and independently tested — so every company still gets an
-   honest draft. The note records `draft_source: agent|template`, and the run
-   summary reports the fallback rate so a broken drafting path is visible in
-   one batch. Messenger DMs stay fully deterministic — no LLM call at all.
-8. **Write vault** — one note per company plus a `_Dashboard.md` of Dataview
-   queries. Re-runs are byte-idempotent and merge by section ownership: your
-   `status` edits, `## Log` entries, and any sections you add are never
-   touched.
+1. **Research** collects public information and records a source for each fact.
+2. **Draft** generates copy from evidence records, validates its citations, and
+   uses a locked template when validation fails.
+3. **Send** delivers only human-approved notes, subject to identity checks,
+   configured limits, and an append-only ledger.
 
-### Name confidence
+Stages communicate through the Obsidian vault. Re-running the pipeline refreshes
+tool-owned fields while preserving approval decisions, logs, and custom
+sections.
 
-| Level | Meaning | Effect on the draft |
-|-------|---------|---------------------|
-| `high` | Explicit owner text, an `/about`–`/team` page name, or an unambiguous email pattern (`scottb@`, `john.smith@`) | Greeted by first name |
-| `medium` | Partial/ambiguous evidence (`derickson@` — surname-likely; footer-only names; third-party enrichment) | Greeting stays "[Company] team"; candidate stored in `name_candidate`; flagged `needs_review` |
-| `none` | Nothing found | "[Company] team" |
+### Pipeline details
 
-Site-extracted candidates must additionally start with a known US first name
-(bundled 660-name list) — losing a rare real name beats greeting a fake one.
-
-### Channel fit (`fb_signal`)
-
-All read from the open web — the Facebook page itself is never contacted:
-
-| Signal | Rule | Template variant |
-|--------|------|------------------|
-| `strong` | Two or more observed signals, at least one showing active usage (chat widget, page embed, active page in search snippets) | Facebook variant |
-| `weak` | Exactly one signal, or presence without activity cues | Channel-agnostic, with one conditional Facebook mention |
-| `none` | Nothing observed | Channel-agnostic, no Facebook mention at all |
-
-Uncertainty always ranks down, never up.
+1. **Ingest and deduplicate** - Parse input, normalize rows, and group genuinely
+   shared inboxes.
+2. **Classify channels** - Route valid emails to email. Blank values,
+   `messenger`, and Facebook URLs enter the Messenger draft queue.
+3. **Resolve websites** - Use Google Places when configured, with a DuckDuckGo
+   fallback during `run`.
+4. **Fetch pages** - Read the homepage and relevant About, Team, and Contact
+   pages.
+5. **Extract evidence** - Identify name candidates, locations, hooks, and
+   Facebook usage signals with source excerpts.
+6. **Score evidence** - Apply deterministic confidence and channel-fit rules.
+7. **Draft and validate** - Send only structured evidence to OpenRouter, then
+   validate every returned citation and claim.
+8. **Write the vault** - Create or update company notes and `_Dashboard.md`
+   without overwriting human-owned content.
 
 ## Installation
 
-Requires Python 3.11+.
+Prospector requires Python 3.11 or later.
 
 ```bash
 git clone https://github.com/anusbutt/Prospector.git
 cd Prospector
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e .
-
-cp .env.example .env   # then add your keys
+python -m venv .venv
 ```
 
-### Configuration
-
-| Variable | Required | Behavior when absent |
-|----------|----------|----------------------|
-| `OPENROUTER_API_KEY` | For drafting | Pre-flight error (or run with `--no-llm`) |
-| `OPENROUTER_MODEL` | No | Defaults to `anthropic/claude-sonnet-4.5` |
-| `GOOGLE_PLACES_API_KEY` | For `source` | `source` exits pre-flight (no fallback discovery); `run`'s website/city resolution falls back to DuckDuckGo only |
-| `HUNTER_API_KEY` | No | Email-name enrichment skipped (capped at medium confidence when present) |
-| `PROSPECTOR_SEND_PROVIDER` | No | Send transport: `gmail` (default) or `smtp` |
-| `PROSPECTOR_SEND_FROM` | For `send` | Pre-flight error — set it to the dedicated outreach mailbox (e.g. `anas@omniveer.com`); the tool refuses to send from any other identity |
-| `PROSPECTOR_SEND_NAME` | No | From display name (`Anas from Omniveer <anas@omniveer.com>`); bare address when unset |
-| `PROSPECTOR_REPLY_TO` | No | `Reply-To` header omitted when unset |
-| `PROSPECTOR_SMTP_HOST` / `_USERNAME` / `_PASSWORD` | For `smtp` provider | Pre-flight error naming the missing variable (values never echoed) |
-| `PROSPECTOR_SMTP_SECURITY` | No | `ssl` (implicit TLS, default) or `starttls` |
-| `PROSPECTOR_SMTP_PORT` | No | Defaults to 465 (`ssl`) / 587 (`starttls`) |
-| `PROSPECTOR_SEND_CAPS` | No | Weekly daily-cap ramp; defaults to `15,30,60,100` (last value applies to week 4+) |
-| `PROSPECTOR_SEND_DELAY` | No | Randomized seconds between real sends; defaults to `30,90` |
-
-Secrets live in `.env` (gitignored). Nothing is ever logged or committed. The
-`send` command's OAuth client secret and token live under `secrets/` (also
-gitignored); the append-only `send_ledger.jsonl` stays local too.
-
-## Sourcing (optional): build the list itself
-
-`prospector source` discovers companies before any of the above runs — for when
-you don't have a list yet:
+Activate the environment:
 
 ```bash
-prospector source                                  # 30 major US metros -> candidates.csv
-prospector source --limit 2 --all --verbose        # small smoke test, keep everything
-prospector source --keyword "air duct cleaning" --metros my_metros.txt
-prospector run candidates.csv                      # output feeds run unchanged
+# macOS/Linux
+source .venv/bin/activate
+
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
 ```
 
-Per metro it queries Google Places Text Search once (budgeted — `--max-queries`,
-default 60, usage reported), dedupes across metros by place id and website
-domain, then fetches each candidate's **own homepage** (same polite fetcher,
-same Facebook-host block) and inspects the HTML source for **Meta Pixel**
-tracking markup — including inside any referenced Google Tag Manager
-container's public configuration, where most modern installs live. Companies whose sites carry the pixel — businesses already
-investing in Meta ads — are written to the CSV (`ad_signal: pixel`); pass
-`--all` to keep every discovered company. A publicly listed contact email is
-captured when one exists (never inferred); rows without one route to the
-Messenger bucket downstream.
+Install the package and create a local configuration file:
 
-Two honesty notes, enforced in code: pixel detection is string inspection of
-already-fetched pages — **no Facebook host is ever contacted** — and
-`ad_signal` is a targeting filter only. It is ignored by `run` and can never
-appear as an ad-running claim in a draft (a pixel can be dormant; guarantee #4
-stands).
+```bash
+pip install -e .
+cp .env.example .env
+```
+
+On Windows PowerShell, use `Copy-Item .env.example .env` instead of `cp`.
+
+## Configuration
+
+Secrets are loaded from the gitignored `.env` file.
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `OPENROUTER_API_KEY` | For drafting | OpenRouter credential. Omit only with `--no-llm`. |
+| `OPENROUTER_MODEL` | No | Defaults to `anthropic/claude-sonnet-4.5`. |
+| `GOOGLE_PLACES_API_KEY` | For `source` | Required for discovery. During `run`, its absence enables the DuckDuckGo fallback. |
+| `HUNTER_API_KEY` | No | Enables email-name enrichment at medium confidence. |
+| `PROSPECTOR_SEND_PROVIDER` | No | `gmail` (default) or `smtp`. |
+| `PROSPECTOR_SEND_FROM` | For `send` | Dedicated address; must match the authenticated identity. |
+| `PROSPECTOR_SEND_NAME` | No | Display name for the `From` header. |
+| `PROSPECTOR_REPLY_TO` | No | Optional `Reply-To` address. |
+| `PROSPECTOR_SMTP_HOST` | For SMTP | SMTP server hostname. |
+| `PROSPECTOR_SMTP_USERNAME` | For SMTP | SMTP login; must match `PROSPECTOR_SEND_FROM`. |
+| `PROSPECTOR_SMTP_PASSWORD` | For SMTP | SMTP or app-specific password. |
+| `PROSPECTOR_SMTP_SECURITY` | No | `ssl` (default) or `starttls`. |
+| `PROSPECTOR_SMTP_PORT` | No | Defaults to `465` for SSL or `587` for STARTTLS. |
+| `PROSPECTOR_SEND_CAPS` | No | Weekly cap ramp; defaults to `15,30,60,100`. |
+| `PROSPECTOR_SEND_DELAY` | No | Delay range in seconds; defaults to `30,90`. |
+| `PROSPECTOR_LEDGER` | No | Ledger path; defaults to `send_ledger.jsonl`. |
+
+Gmail OAuth files live under `secrets/`; the send ledger remains local. Both
+locations are excluded from version control.
+
+## Usage
+
+### Process a company list
+
+```bash
+prospector run companies.csv
+prospector run companies.csv --vault ~/Obsidian/Outreach
+prospector run companies.csv --limit 3
+prospector run companies.csv --only summit-duct-care
+prospector run companies.csv --no-llm
+```
+
+The default output directory is `Vault/Outreach`.
+
+### Refresh the dashboard
+
+```bash
+prospector dashboard
+prospector dashboard --vault ~/Obsidian/Outreach
+```
+
+### Discover companies
+
+```bash
+prospector source
+prospector source --limit 2 --all --verbose
+prospector source --keyword 'air duct cleaning' --metros my_metros.txt
+prospector source --out candidates.csv --max-queries 30
+```
+
+`source` uses Google Places Text Search, deduplicates results, fetches each
+candidate's own website, and checks retrieved markup for Meta Pixel signals
+without contacting Facebook. By default it writes pixel-positive candidates;
+use `--all` to retain every result. Pixel presence is a sourcing filter, not
+evidence that a company currently runs advertisements.
+
+### Preview or send approved drafts
+
+```bash
+prospector send
+prospector send --send
+prospector send --send --limit 5
+prospector send --send --vault ~/Obsidian/Outreach
+prospector send --send --yes
+```
+
+`prospector send` is a dry-run unless `--send` is present.
+
+### Exit codes
+
+| Command | Code | Meaning |
+| --- | ---: | --- |
+| `run`, `source` | `0` | Batch completed; individual failures may be reported. |
+| `run`, `source` | `1` | Pre-flight failure; nothing was written. |
+| `run`, `source` | `2` | Unexpected mid-run failure; valid output remains. |
+| `send` | `0` | Operation completed; per-message failures are reported. |
+| `send` | `1` | Configuration or pre-flight failure. |
+| `send` | `2` | Authenticated identity does not match the configured sender. |
+| `send` | `3` | Gmail OAuth or SMTP authentication failed. |
 
 ## Input format
 
-CSV or markdown table. Minimum columns: `company`, `email`. Optional:
-`website`, `facebook_url`, `city`, `owner_name`, `notes`. Headers are
-case-insensitive; unknown columns are ignored with a warning; malformed rows
-are reported by number without aborting the batch.
-
-A fictional example exercising every input feature (email and messenger
-buckets, a Facebook-URL email field, a human-supplied owner name, and a
-shared-inbox duplicate pair):
+Input may be CSV or a Markdown table. `company` and `email` are required;
+`website`, `facebook_url`, `city`, `owner_name`, and `notes` are
+optional. Headers are case-insensitive. Unknown columns produce a warning, and
+malformed rows are reported without aborting the batch.
 
 ```csv
 company,email,website,city,owner_name,notes
@@ -217,30 +238,87 @@ Mile High Ducts,scott@milehighducts.example.com,milehighducts.example.com,,Scott
 Mile High Dryer Vents,scott@milehighducts.example.com,milehighducts.example.com,Denver,,same owner
 ```
 
-## Usage
+### Evidence scoring
 
-```bash
-prospector run companies.csv                       # writes Vault/Outreach/
-prospector run companies.csv --vault ~/Obsidian/Outreach
-prospector run companies.csv --limit 3             # try a few rows first
-prospector run companies.csv --no-llm              # research & score only
-prospector run companies.csv --only summit-duct-care
-prospector dashboard --vault ~/Obsidian/Outreach   # refresh _Dashboard.md only
+| Name confidence | Draft behavior |
+| --- | --- |
+| `high` | Uses a source-backed first name from explicit owner text, an About or Team page, an unambiguous email pattern, or human input. |
+| `medium` | Keeps the company-team greeting, stores the candidate, and flags the note for review. |
+| `none` | Uses the company-team greeting. |
 
-# Approve notes in Obsidian (set status: approved), then:
-prospector send                                    # DRY-RUN preview (default; sends nothing)
-prospector send --send                             # actually send approved notes (first run does one-time OAuth)
-prospector send --send --limit 5                   # send at most 5 this run (still capped)
+Site-extracted candidates must also match the bundled US first-name list.
+Conservative rejection is preferred over an incorrect greeting.
+
+| Facebook signal | Rule | Draft behavior |
+| --- | --- | --- |
+| `strong` | At least two signals, including an active-use indicator | Facebook-specific variant. |
+| `weak` | One signal, or presence without activity | Channel-neutral copy with one conditional mention. |
+| `none` | No observed signal | Channel-neutral copy without a Facebook mention. |
+
+Signals come from the open web; the Facebook page itself is never requested.
+Uncertain evidence always scores down rather than up.
+
+## Review workflow
+
+1. Run `prospector run` against the company list.
+2. Open the generated vault in Obsidian.
+3. Review the **Needs review** queue and confirm or reject `name_candidate`
+   values.
+4. Review each draft in the **To send** queue.
+5. Change `status: to-send` to `status: approved` when the message is ready.
+6. Run `prospector send` to preview the batch.
+7. Run `prospector send --send` to deliver it.
+
+Prospector preserves user-edited statuses, `## Log` entries, and custom sections
+across research runs. During real delivery, the only automatic user-visible
+status transition is `approved` to `sent`.
+
+`_Dashboard.md` uses the
+[Dataview](https://blacksmithgu.github.io/obsidian-dataview/) Obsidian plugin
+for live queues. Notes remain usable as ordinary Markdown without Dataview.
+
+## Sending approved drafts
+
+### SMTP
+
+```dotenv
+PROSPECTOR_SEND_PROVIDER=smtp
+PROSPECTOR_SMTP_HOST=smtp.zoho.com
+PROSPECTOR_SMTP_SECURITY=ssl
+PROSPECTOR_SMTP_PORT=465
+PROSPECTOR_SMTP_USERNAME=outreach@example.com
+PROSPECTOR_SMTP_PASSWORD=<app-specific-password>
+PROSPECTOR_SEND_FROM=outreach@example.com
+PROSPECTOR_SEND_NAME=Example Outreach
 ```
 
-Exit codes: `0` batch completed (individual company failures are isolated and
-reported in the summary), `1` pre-flight failure (nothing written), `2`
-unexpected mid-run crash (already-written notes remain valid; re-running
-resumes safely).
+Authentication is mandatory, TLS certificates are verified, and the SMTP
+username must match the sender address. See
+[`specs/004-provider-transport/quickstart.md`](specs/004-provider-transport/quickstart.md)
+for the complete setup guide.
+
+### Gmail
+
+Gmail is the default provider. Enable the Gmail API in a Google Cloud project,
+create a Desktop OAuth client, and place its secret at
+`secrets/gmail_client_secret.json`. The first real send opens OAuth consent and
+stores the token at `secrets/gmail_token.json`. The authenticated account must
+match `PROSPECTOR_SEND_FROM`.
+
+### Delivery controls
+
+For every real send, Prospector verifies the sender, checks the remaining daily
+allowance, skips ledgered recipients and notes, delivers through the selected
+provider, records the message ID, changes the note to `sent`, and waits for a
+randomized interval.
+
+Individual failures leave the affected note approved and do not stop the batch.
+A stopped run can be resumed safely because the append-only ledger prevents
+duplicate delivery.
 
 ## Output
 
-One note per company, keyed by a stable slug:
+Each company receives a stable, slug-keyed Markdown note:
 
 ```markdown
 ---
@@ -257,164 +335,61 @@ angle: offer-led
 fb_signal: none
 duplicate_of:
 needs_review: false
-draft_source: agent          # agent | template — which path wrote this copy
-outcome:                     # human-owned: replied | interested | bounced | no
+draft_source: agent
+outcome:
 tags: [outreach, duct-cleaning, prospector]
 ---
 
 ## Draft
-**Subject:** ...paste-ready subject...
+**Subject:** Example subject
 
-...paste-ready body...
+Example draft body.
 
 ## Citations
-*What each body paragraph rests on. The tool proves a cited record exists;
-only you can confirm it actually says what the sentence claims.*
-
-1. `hook_source_1` — "...serving the Denver area for 18 years..." (summitduct.example.com/about)
-2. `offer` — the offer, product, or sender (not a claim about them)
+1. `hook_source_1` - source excerpt and URL
+2. `offer` - sender, product, or offer information
 
 ## Research
-- Owner name: not found (no /about page)
-- Sources: every URL consulted, including failures
-- Hook: Denver service area (input row: "city: Denver")
-- fb_signal: none — no FB link/widget/search presence found
-- Failures: (none)
+- Sources and extracted evidence
+- Confidence and signal decisions
+- Fetch or validation failures
 
 ## Log
 -
 ```
 
-On an **agent-written** note, a `## Citations` section maps each body paragraph
-to the research record it rests on — the interface for the one check the
-validator cannot perform (whether a real record actually *supports* a sentence,
-not merely that it exists). **Template-fallback notes have no Citations
-section**, since they make no per-paragraph claims. `draft_source` records which
-path ran; `outcome` is yours to fill in when a prospect replies, and the
-dashboard groups reply outcomes by drafting path so the two can be compared.
+Agent-written notes map their content to research records in `## Citations`.
+Template-fallback notes omit this section because they make no
+prospect-specific claims. `draft_source` identifies the drafting path, and
+`outcome` is reserved for human tracking.
 
-`_Dashboard.md` provides live queues via the
-[Dataview](https://blacksmithgu.github.io/obsidian-dataview/) community plugin
-(to-send, needs-review, messenger bucket, pipeline by status). Without
-Dataview, everything still works as plain markdown.
+## Design principles
 
-### Review workflow
+- **Deterministic trust boundary.** Confidence scoring, classification,
+  citation resolution, and claim validation are implemented in Python. The
+  model controls phrasing, not factual acceptance.
+- **Evidence-limited drafting.** The model receives structured evidence rather
+  than raw HTML; invalid output is discarded.
+- **Human-owned state.** Approval, outcomes, logs, and custom content stay in
+  readable Markdown and survive repeated runs.
+- **Safe degradation.** Optional-service failures use documented fallbacks or
+  reduce enrichment without weakening validation.
+- **Spec-driven development.** Product intent is in [`PRODUCT.md`](PRODUCT.md),
+  with implementation specifications under [`specs/`](specs/).
 
-1. Open the vault folder in Obsidian.
-2. **Needs review** queue: confirm or reject `name_candidate` suggestions,
-   clear `needs_review`.
-3. **To-send** queue: read the draft. When you're happy with one, set
-   `status: approved` — that is your explicit green light to send it.
-4. Run `prospector send` (see [Sending](#sending-optional-deliver-approved-drafts)):
-   it previews by default, and with `--send` delivers the approved notes and
-   flips each to `status: sent`.
-5. Re-run `run` whenever the list changes. The tool updates its own fields and
-   never overwrites yours — the **only** status change it ever makes is the
-   sanctioned `approved → sent` step during a real send; your other `status`
-   edits, `## Log` entries, and any custom sections are preserved verbatim.
+## Limitations
 
-## Sending (optional): deliver approved drafts
-
-`prospector send` delivers the notes you have marked `status: approved` — and
-only those — as plain emails from a dedicated outreach mailbox, through one of
-two transports selected by `PROSPECTOR_SEND_PROVIDER`: the **Gmail API**
-(default, backward compatible) or **authenticated SMTP** (e.g. a Zoho
-custom-domain mailbox). It is **dry-run by default**: with no flag it previews
-exactly what it would send and touches nothing — no authentication, no
-connection, no external request. A real send requires `--send`.
-
-```bash
-# after approving notes in Obsidian (status: approved):
-prospector send                     # DRY-RUN preview (sends nothing, connects to nothing)
-prospector send --send              # actually send (gmail: first run does a one-time OAuth)
-prospector send --send --limit 5    # send at most 5 this run (still capped)
-prospector send --send --vault ~/Obsidian/Outreach
-```
-
-Each real send, in order: verifies the *authenticated* identity is
-`PROSPECTOR_SEND_FROM` (and **refuses** otherwise — never a personal account,
-never a spoofed From), checks today's remaining allowance against the ramped
-cap, skips anyone already in the ledger, delivers via the configured provider,
-records a ledger line with the provider's message id, flips the note to
-`status: sent`, then waits a randomized 30–90s before the next one.
-
-- **The ledger** (`send_ledger.jsonl`, append-only, gitignored) is the source of
-  truth for the daily count and for **double-send prevention** — a recipient or
-  note already recorded as sent is never sent again, even if its status is reset.
-  A crashed run resumes safely: just run it again.
-- **The daily cap ramps** (default `15 → 30 → 60 → 100` per week), anchored on your
-  first send, so a new account builds reputation instead of getting flagged.
-- **Failures are isolated**: a single send that errors leaves its note `approved`,
-  logs the reason, and the run continues — nothing is silently dropped or double-sent.
-
-Exit codes for `send`: `0` completed (per-message failures are reported, not fatal),
-`1` pre-flight failure (including missing/invalid provider or SMTP configuration),
-`2` wrong account (nothing sent), `3` authentication failure (OAuth or SMTP login).
-
-### SMTP setup (e.g. Zoho custom domain)
-
-A custom-domain mailbox can publish SPF/DKIM/DMARC — the deliverability upgrade
-a free Gmail account can't get. In `.env` (gitignored; the password is never
-logged and never committed):
-
-```bash
-PROSPECTOR_SEND_PROVIDER=smtp
-PROSPECTOR_SMTP_HOST=smtp.zoho.com
-PROSPECTOR_SMTP_SECURITY=ssl              # implicit TLS on 465 (or starttls on 587)
-PROSPECTOR_SMTP_USERNAME=anas@omniveer.com
-PROSPECTOR_SMTP_PASSWORD=<app-specific password>
-PROSPECTOR_SEND_FROM=anas@omniveer.com    # must equal the SMTP username (no spoofing)
-PROSPECTOR_SEND_NAME=Anas from Omniveer   # From: Anas from Omniveer <anas@omniveer.com>
-```
-
-Authentication is mandatory, TLS certificates are verified, and each message
-carries proper `From`/`Reply-To`/`Date`/`Message-ID` headers (the Message-ID is
-stored in the ledger). See
-[`specs/004-provider-transport/quickstart.md`](specs/004-provider-transport/quickstart.md)
-for the full walkthrough.
-
-### Gmail setup (default provider)
-
-A Google Cloud project with the Gmail API enabled and a Desktop OAuth client;
-put its client-secret JSON at `secrets/gmail_client_secret.json`. The first
-`--send` opens a browser consent (sign in as the dedicated outreach account —
-`PROSPECTOR_SEND_FROM` must match it); the token is then saved to
-`secrets/gmail_token.json` and reused. A free Gmail can't publish
-SPF/DKIM/DMARC, so warm the account up and expect the realistic cap to plateau
-below 100 — deliverability, not the code, is the limiting factor.
-
-## Design notes
-
-- **Deterministic honesty core, LLM at the edge.** Everything that affects
-  trust — confidence scoring, signal classification, and validation — is plain
-  Python with unit tests. The LLM writes the prose but decides nothing: it must
-  cite a recorded source for every claim, a deterministic validator resolves
-  each citation, and anything unverifiable is discarded in favour of a locked
-  template. The model gains freedom of phrasing, never freedom of fact.
-- **Spec-driven.** The project was built constitution → spec → plan → tasks →
-  implementation; all artifacts are in [`specs/001-prospector-cli/`](specs/001-prospector-cli/)
-  and the product intent in [`PRODUCT.md`](PRODUCT.md).
-- **Verification.** A ~500-test offline suite (network and LLM stubbed at the
-  httpx-transport level) covers the pipeline, including transport-level proof
-  that no request ever reaches a Facebook host, adversarial tests that every
-  uncited or laundered claim is rejected, and a proof that the locked-template
-  path is byte-for-byte unchanged by the agent work. Validated live against real
-  companies
-  before release. The suite is kept out of this repository.
-
-## Honest limitations
-
-- Name hit rate on real lists runs roughly 30–60% depending on how much the
-  target sites disclose — the goal is lift over manual research, not
-  perfection. Everything below high confidence is flagged, never guessed.
-- Heuristics are tuned for US/English local-service businesses with simple
-  websites. Enterprises, e-commerce, and non-English markets would need work.
-- The drafting voice and offer live in four Markdown files under
-  `prospector/agent/` (identity, offer, constraints, writing skill) plus one
-  locked-template fallback. Adapting the tool to another vertical means editing
-  that prose — no code change — though the extraction heuristics and the locked
-  template still assume the duct-cleaning offer.
+- Name extraction depends on what public websites disclose; lower-confidence
+  candidates are flagged rather than guessed.
+- Heuristics are optimized for English-language US local-service businesses.
+- Drafting instructions in `prospector/agent/` and the fallback template are
+  currently tailored to the duct-cleaning offer.
+- Meta Pixel markup does not prove current advertising activity and is never
+  presented as such.
+- Deliverability depends on mailbox reputation, authentication, domain policy,
+  message quality, and recipient behavior; application caps do not guarantee
+  inbox placement.
 
 ## License
 
-[MIT](LICENSE)
+Prospector is available under the [MIT License](LICENSE).
