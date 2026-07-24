@@ -7,25 +7,26 @@ runner = CliRunner()
 
 
 class TestDashboardContent:
-    def test_six_dataview_query_blocks(self):
-        # 4 original queues + 2 added by 006 (draft source, outcome by source)
-        assert DASHBOARD_CONTENT.count("```dataview") == 6
+    def test_five_dataview_query_blocks(self):
+        # 3 original queues + 2 added by 006 (draft source, outcome by source).
+        # 008 removed the Messenger bucket: there is only one channel.
+        assert DASHBOARD_CONTENT.count("```dataview") == 5
 
     def test_queries_filter_on_documented_fields(self):
-        # to-send queue excludes duplicates and non-email channels
-        assert 'WHERE status = "to-send" AND channel = "email" AND !duplicate_of' in DASHBOARD_CONTENT
+        # to-send queue excludes duplicates (008: every note is email-channel)
+        assert 'WHERE status = "to-send" AND !duplicate_of' in DASHBOARD_CONTENT
         # needs-review includes medium-confidence candidates
         assert 'WHERE needs_review = true OR name_confidence = "medium"' in DASHBOARD_CONTENT
         assert "name_candidate" in DASHBOARD_CONTENT
-        # messenger bucket
-        assert 'WHERE channel = "messenger"' in DASHBOARD_CONTENT
+        # 008: no Messenger bucket remains
+        assert "messenger" not in DASHBOARD_CONTENT.lower()
         # pipeline grouped by status
         assert "GROUP BY status" in DASHBOARD_CONTENT
         # 006 measurement queries
         assert DASHBOARD_CONTENT.count("GROUP BY draft_source") == 2
         assert 'GROUP BY draft_source + " / " + outcome' in DASHBOARD_CONTENT
         # folder-agnostic tag scope on every query
-        assert DASHBOARD_CONTENT.count("FROM #prospector") == 6
+        assert DASHBOARD_CONTENT.count("FROM #prospector") == 5
 
     def test_plain_markdown_fallback_note_present(self):
         assert "Without Dataview this note still renders" in DASHBOARD_CONTENT

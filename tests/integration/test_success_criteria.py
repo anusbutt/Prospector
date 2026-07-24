@@ -31,16 +31,6 @@ class TestSuccessCriteria:
         duplicates = [n for n, t in load_notes(vault_dir).items() if frontmatter(t)["duplicate_of"]]
         assert duplicates == ["acme-duct-south.md"]
 
-    def test_sc004_messenger_rows_get_dm_and_queue(self, tmp_path, stubbed_network):
-        _, vault_dir = run_fixture_batch(tmp_path)
-        messenger = {
-            n: t for n, t in load_notes(vault_dir).items()
-            if frontmatter(t)["channel"] == "messenger"
-        }
-        assert messenger, "fixture batch must include a messenger row"
-        for text in messenger.values():
-            assert "Hey! I'm giving 5 duct cleaning companies a free 10-day pilot of the Omniveer Duct Lead Qualifier." in text
-
     def test_sc005_channel_honesty(self, tmp_path, stubbed_network):
         _, vault_dir = run_fixture_batch(tmp_path)
         assert stubbed_network["blocked"].call_count == 0, "a request reached a Facebook host"

@@ -10,13 +10,12 @@ from prospector.draft import (
     DraftError,
     assemble_email,
     build_email_draft,
-    build_messenger_draft,
     expected_greeting,
     is_generic_inbox,
     request_slots,
     validate_email_draft,
 )
-from prospector.models import Company, FbSignal, Prospect, ResearchResult, Variant
+from prospector.models import Company, Prospect, ResearchResult
 
 PRODUCT_URL = "https://www.omniveer.com/duct-lead-qualifier"
 SIGNATURE = "Anas\nFounder, Omniveer"
@@ -80,61 +79,23 @@ class TestAssembly:
         assert "messages your page" not in draft.body.lower()
 
 
-class TestSignalNeutrality:
-    """Rev. 2: one channel-neutral body for every fb_signal level — the §7.5
-    honesty gate is satisfied by making no channel claims at all."""
+class TestChannelNeutrality:
+    """008: there is one channel-neutral body. Channel signals are no longer
+    researched, so the copy asserts nothing about the prospect's channels and
+    never claims ad-running (Constitution v7.0.0, Principle IV)."""
 
-    def test_strong_signal_gets_the_same_neutral_body(self):
-        strong = make_prospect()
-        strong.fb_signal = FbSignal.STRONG
-        strong.variant = Variant.EMAIL_FB
-        neutral = assemble_email(make_prospect(), GOOD_SLOTS)
-        draft = assemble_email(strong, GOOD_SLOTS)
-        assert draft.validated, draft.validation_errors
-        assert draft.body == neutral.body
+    def test_body_is_deterministic_for_identical_input(self):
+        assert assemble_email(make_prospect(), GOOD_SLOTS).body == assemble_email(make_prospect(), GOOD_SLOTS).body
 
-    def test_weak_and_none_signals_identical(self):
-        weak = make_prospect()
-        weak.fb_signal = FbSignal.WEAK
-        none_p = make_prospect()
-        assert assemble_email(weak, GOOD_SLOTS).body == assemble_email(none_p, GOOD_SLOTS).body
+    def test_never_claims_ads(self):
+        draft = assemble_email(make_prospect(), GOOD_SLOTS)
+        for banned in ("your ads", "ad campaign", "running ads", "advertis", "ad spend"):
+            assert banned not in draft.body.lower()
 
-    def test_never_claims_ads_at_any_signal(self):
-        for signal in (FbSignal.STRONG, FbSignal.WEAK, FbSignal.NONE):
-            prospect = make_prospect()
-            prospect.fb_signal = signal
-            draft = assemble_email(prospect, GOOD_SLOTS)
-            for banned in ("your ads", "ad campaign", "running ads", "advertis"):
-                assert banned not in draft.body.lower()
-
-
-class TestMessengerDm:
-    def test_dm_with_city_clause(self):
-        prospect = make_prospect()
-        prospect.variant = Variant.MESSENGER_DM
-        prospect.research.city = "Boston"
-        draft = build_messenger_draft(prospect)
-        assert draft.validated, draft.validation_errors
-        assert draft.subject is None
-        assert "It checks customers are real, around Boston, quotes your real prices" in draft.body
-        assert draft.body.startswith("Hey! I'm giving 5 duct cleaning companies")
-        assert draft.body.endswith("(See it working: https://www.omniveer.com/duct-lead-qualifier)")
-
-    def test_dm_without_city_drops_clause(self):
-        prospect = make_prospect()
-        prospect.variant = Variant.MESSENGER_DM
-        prospect.research.city = None
-        prospect.company.city = None
-        draft = build_messenger_draft(prospect)
-        assert draft.validated
-        assert ", around" not in draft.body
-        assert "It checks customers are real, quotes your real prices" in draft.body
-
-    def test_dm_is_deterministic_no_llm(self):
-        prospect = make_prospect()
-        prospect.variant = Variant.MESSENGER_DM
-        assert build_messenger_draft(prospect).body == build_messenger_draft(prospect).body
-        assert build_messenger_draft(prospect).model == "deterministic"
+    def test_makes_no_possessive_channel_claim(self):
+        body = assemble_email(make_prospect(), GOOD_SLOTS).body.lower()
+        for phrase in ("your facebook page", "your page", "your inbox", "your messenger"):
+            assert phrase not in body
 
 
 class TestValidator:
@@ -197,30 +158,15 @@ class TestValidator:
         assert not draft.validated
         assert any("does not trace to a recorded source" in e for e in draft.validation_errors)
 
-    def test_sourced_name_accepted(self):
-        from prospector.models import Evidence, EvidenceKind
-
-        prospect = make_prospect()
-        prospect.name_used = "Scott"
-        prospect.research.name_evidence.append(
-            Evidence(kind=EvidenceKind.ABOUT_PAGE, value="Scott Brown", source="https://acmeduct.com/about")
-        )
-        slots = dict(GOOD_SLOTS, greeting_name="Scott")
-        draft = assemble_email(prospect, slots)
-        assert draft.validated, draft.validation_errors
-        assert draft.body.startswith("Hi Scott,")
-
 
 class TestLinkStrategy:
-    """005 FR-201..205: Omniveer branding + exactly one promotional link (the
-    product page), no homepage combo, no LinkedIn in the pitch, no legacy brand."""
+    """005: exactly one promotional link (the product page), no homepage combo,
+    no LinkedIn in the pitch, no legacy brand name.
+
+    008: only the email body remains — there is no second channel."""
 
     def all_golden_bodies(self):
-        email = assemble_email(make_prospect(email="info@acmeduct.com"), GOOD_SLOTS)
-        dm_prospect = make_prospect()
-        dm_prospect.variant = Variant.MESSENGER_DM
-        dm = build_messenger_draft(dm_prospect)
-        return {"email": email, "dm": dm}
+        return {"email": assemble_email(make_prospect(email="info@acmeduct.com"), GOOD_SLOTS)}
 
     def test_nestaro_branding_is_gone(self):
         for name, draft in self.all_golden_bodies().items():

@@ -3,7 +3,7 @@ from pathlib import Path
 import httpx
 import respx
 
-from prospector.extract import PageContent, detect_fb_evidence, discover_extra_pages, extract
+from prospector.extract import PageContent, discover_extra_pages, extract
 from prospector.models import Company, EvidenceKind
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "sites"
@@ -98,49 +98,6 @@ class TestNameExtraction:
         # homepage alone: footer says "© 2025 Acme Duct Cleaning" -> not a person
         assert all(e.value != "Acme Duct" for e in outcome.name_evidence)
         assert outcome.name_evidence == []
-
-
-class TestFbEvidence:
-    def page(self, site):
-        return [PageContent("homepage", f"https://{site}.test", fixture(site, "index.html"))]
-
-    @respx.mock
-    def test_widget_site_yields_widget_and_link(self):
-        catch_all = respx.route().mock(return_value=httpx.Response(200))
-        evidence = detect_fb_evidence(self.page("fb-widget"))
-        kinds = {e.kind for e in evidence}
-        assert EvidenceKind.FB_WIDGET in kinds
-        assert EvidenceKind.FB_LINK in kinds
-        assert catch_all.call_count == 0, "fb detection must never fetch"
-
-    @respx.mock
-    def test_embed_site_yields_embed_not_link(self):
-        catch_all = respx.route().mock(return_value=httpx.Response(200))
-        evidence = detect_fb_evidence(self.page("fb-embed"))
-        kinds = {e.kind for e in evidence}
-        assert kinds == {EvidenceKind.FB_EMBED}
-        assert catch_all.call_count == 0
-
-    @respx.mock
-    def test_bare_footer_link_yields_single_soft_signal(self):
-        catch_all = respx.route().mock(return_value=httpx.Response(200))
-        evidence = detect_fb_evidence(self.page("fb-link"))
-        assert [e.kind for e in evidence] == [EvidenceKind.FB_LINK]
-        assert evidence[0].value == "https://www.facebook.com/zetavents"
-        assert catch_all.call_count == 0
-
-    @respx.mock
-    def test_no_fb_site_yields_nothing(self):
-        catch_all = respx.route().mock(return_value=httpx.Response(200))
-        assert detect_fb_evidence(self.page("plain")) == []
-        assert catch_all.call_count == 0
-
-    def test_one_evidence_per_kind_across_pages(self):
-        pages = self.page("fb-link") + [
-            PageContent("about", "https://zeta.test/about", fixture("fb-link", "index.html"))
-        ]
-        evidence = detect_fb_evidence(pages)
-        assert len([e for e in evidence if e.kind is EvidenceKind.FB_LINK]) == 1
 
 
 class TestCityAndHook:

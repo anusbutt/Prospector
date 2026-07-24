@@ -271,8 +271,8 @@ def fetch_homepage(candidate: Candidate, fetcher: Fetcher, summary: SourcingSumm
 
 
 # Conservative: word-ish local part, dotted domain, 2+ letter TLD. Misses exotic
-# addresses on purpose — a missed email costs a messenger-bucket route, a wrong
-# one costs a bounced send.
+# addresses on purpose — a missed email costs a reported skip, a wrong one
+# costs a bounced send.
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 ASSET_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg")
 

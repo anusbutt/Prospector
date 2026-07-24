@@ -39,7 +39,6 @@ from prospector.models import (
     Draft,
     DraftBlock,
     EvidenceRef,
-    FbSignal,
     Prospect,
     ResearchResult,
 )
@@ -67,13 +66,16 @@ NON_DISTINCTIVE = GENERIC_TOKENS | TRADE_TOKENS
 # V13 (added 2026-07-20 after the first live run). Possessive channel phrasing
 # turns a PRODUCT fact into a claim about the prospect: "it answers your
 # Facebook page messages" asserts they have a page and that customers message
-# it. Constitution Principle V permits that only at fb_signal `strong`, and
-# only with the observed signal cited.
+# it.
 #
 # This was found by the first three real drafts: two of two agent drafts wrote
-# "your Facebook page" at fb_signal `weak`, citing only `offer`. V3 could not
-# see it — the phrase contains no company, city, name, or hook token — which is
-# exactly why a phrase-level rule is needed alongside the token-level one.
+# "your Facebook page" citing only `offer`. V3 could not see it — the phrase
+# contains no company, city, name, or hook token — which is exactly why a
+# phrase-level rule is needed alongside the token-level one.
+#
+# 008 (v7.0.0): channel signals are no longer researched, so no evidence can
+# ever support such a claim. The rule is therefore unconditional — describe what
+# the product does, never what the prospect has.
 POSSESSIVE_CHANNEL_PHRASES = (
     "your facebook page",
     "your fb page",
@@ -85,9 +87,6 @@ POSSESSIVE_CHANNEL_PHRASES = (
     "messages your page",
     "message your page",
 )
-
-FB_EVIDENCE_PREFIXES = ("fb_",)
-
 
 class AgentDraftError(Exception):
     """Agent path could not produce a usable draft. Always caught internally."""
@@ -103,7 +102,7 @@ def build_evidence_refs(research: ResearchResult) -> list[EvidenceRef]:
     ids and therefore byte-identical notes on re-run (FR-329). Readable ids
     matter: the operator reviewing a citation should be able to tell where it
     points without a lookup table."""
-    records = list(research.name_evidence) + list(research.fb_evidence)
+    records = list(research.name_evidence)
     if research.hook_evidence is not None:
         records.append(research.hook_evidence)
 
@@ -308,29 +307,20 @@ def validate_citations(response: AgentResponse, prospect: Prospect, refs: list[E
 def validate_channel_claims(response: AgentResponse, prospect: Prospect) -> list[str]:
     """Rule V13: possessive channel phrasing is a claim about the prospect.
 
-    Permitted only when the observed signal is `strong` AND the block making the
-    claim cites an `fb_*` evidence record. Anything less defaults down, per
-    Principle V's "when the signal is uncertain, default DOWN, never up"."""
+    Unconditionally rejected (008, Constitution v7.0.0 Principle IV): the tool no
+    longer researches any channel signal, so no recorded evidence could support
+    "your page" / "your inbox". Describe what the product does, never what the
+    prospect is asserted to have."""
     errors: list[str] = []
     for i, block in enumerate(response.blocks, start=1):
         lowered = block.text.lower()
         phrase = next((p for p in POSSESSIVE_CHANNEL_PHRASES if p in lowered), None)
         if phrase is None:
             continue
-        cites_fb = any(
-            c.startswith(FB_EVIDENCE_PREFIXES) for c in block.cites
+        errors.append(
+            f"block {i} claims the prospect's own channel ({phrase!r}) — "
+            f"describe what the product does, not what they have"
         )
-        if prospect.fb_signal is not FbSignal.STRONG:
-            errors.append(
-                f"block {i} claims the prospect's own channel ({phrase!r}) "
-                f"but fb_signal is {prospect.fb_signal.value!r} — describe what the "
-                f"product does, not what they have"
-            )
-        elif not cites_fb:
-            errors.append(
-                f"block {i} claims the prospect's own channel ({phrase!r}) "
-                f"without citing the observed fb_* signal"
-            )
     return errors
 
 

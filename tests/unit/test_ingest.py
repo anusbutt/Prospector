@@ -1,7 +1,7 @@
 import pytest
 
 from prospector.ingest import IngestError, load_companies, mark_duplicates
-from prospector.models import Channel, Company
+from prospector.models import Company
 from prospector.vault import assign_slugs
 
 
@@ -19,7 +19,7 @@ class TestCsvParsing:
         c = companies[0]
         assert c.company == "Acme Duct"
         assert c.email == "info@acme.com"
-        assert c.channel is Channel.EMAIL
+        assert c.channel == "email"
         assert c.row_num == 2
 
     def test_headers_case_insensitive_and_optionals(self, tmp_path):
@@ -69,7 +69,7 @@ class TestMarkdownParsing:
         companies, _ = load_companies(path)
         assert len(companies) == 2
         assert companies[0].company == "Acme Duct"
-        assert companies[1].channel is Channel.MESSENGER
+        assert companies[1].email is None  # 008: no address supplied, no bucket
 
     def test_no_table_fatal(self, tmp_path):
         path = write(tmp_path, "list.md", "just prose, no table\n")
@@ -77,34 +77,40 @@ class TestMarkdownParsing:
             load_companies(path)
 
 
-class TestBucketing:
+class TestAddressClassification:
+    """008: every row is email-channel. A blank / "messenger" / Facebook-URL /
+    unparseable field means NO ADDRESS SUPPLIED (recovered or skipped later),
+    never a second-channel bucket."""
+
     @pytest.mark.parametrize(
-        "email_value,channel,needs_review",
+        "email_value,expected_email,needs_review",
         [
-            ("info@acme.com", Channel.EMAIL, False),
-            ("", Channel.MESSENGER, False),
-            ("messenger", Channel.MESSENGER, False),
-            ("Messenger", Channel.MESSENGER, False),
-            ("https://facebook.com/acmeduct", Channel.MESSENGER, False),
-            ("www.fb.com/acmeduct", Channel.MESSENGER, False),
-            ("not-an-email", Channel.MESSENGER, True),
+            ("info@acme.com", "info@acme.com", False),
+            ("", None, False),
+            ("messenger", None, False),
+            ("Messenger", None, False),
+            ("https://facebook.com/acmeduct", None, False),
+            ("www.fb.com/acmeduct", None, False),
+            ("not-an-email", None, True),
         ],
     )
-    def test_bucketing_matrix(self, tmp_path, email_value, channel, needs_review):
+    def test_address_matrix(self, tmp_path, email_value, expected_email, needs_review):
         path = write(tmp_path, "list.csv", f'company,email\nAcme,"{email_value}"\n')
         companies, warnings = load_companies(path)
         c = companies[0]
-        assert c.channel is channel
+        assert c.email == expected_email
+        assert c.channel == "email"  # 008: the only channel
         assert c.needs_review is needs_review
         assert c.raw_email_field == email_value
         if needs_review:
             assert any("unrecognized email field" in w for w in warnings)
 
-    def test_messenger_rows_have_no_email(self, tmp_path):
+    def test_facebook_url_is_not_an_address(self, tmp_path):
         path = write(tmp_path, "list.csv", "company,email\nAcme,https://facebook.com/acme\n")
         companies, _ = load_companies(path)
         assert companies[0].email is None
-        assert companies[0].bucket_reason == "facebook url in email field"
+        assert companies[0].channel == "email"
+        assert "no email supplied" in companies[0].bucket_reason
 
 
 def company(name, email, city=None):

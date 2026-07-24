@@ -14,17 +14,14 @@ from prospector import ingest, resolve, score, vault
 from prospector.config import Settings
 from prospector.fetch import Fetcher, FetchError
 from prospector.models import (
-    Channel,
     Company,
     Confidence,
     Draft,
     Evidence,
     EvidenceKind,
-    FbSignal,
     Prospect,
     ResearchResult,
     RunSummary,
-    Variant,
 )
 
 
@@ -115,15 +112,11 @@ def _process_company(
         # FR-326: approved/sent copy is never regenerated, so no drafting call
         # is made at all. ## Research still refreshes from the work above.
         return prospect, draft
-    if company.channel is Channel.EMAIL:
-        # 006: agent path with automatic template fallback. Never raises, so
-        # the batch cannot be aborted by a drafting failure (FR-318).
-        draft = agent_draft.draft_email(prospect, settings, instructions)
-        if draft.validation_errors:
-            research.failures.extend(draft.validation_errors)
-    else:
-        # FR-308: messenger DMs stay fully deterministic — no model call.
-        draft = drafting.build_messenger_draft(prospect)
+    # 006: agent path with automatic template fallback. Never raises, so the
+    # batch cannot be aborted by a drafting failure (FR-318).
+    draft = agent_draft.draft_email(prospect, settings, instructions)
+    if draft.validation_errors:
+        research.failures.extend(draft.validation_errors)
     if draft is not None and not draft.validated:
         prospect.needs_review = True
     return prospect, draft
@@ -153,21 +146,9 @@ def _research(company: Company, settings: Settings, fetcher: Fetcher, *, verbose
         research.hook = outcome.hook
         research.hook_evidence = outcome.hook_evidence
         research.city = outcome.city
-        research.fb_evidence.extend(extracting.detect_fb_evidence(pages))
 
-    search_evidence = resolve.fb_search_evidence(company, fetcher, info)
-    # fb_search_evidence appended to info; union with page-fetch entries, order-stable
     research.sources_consulted = list(dict.fromkeys(research.sources_consulted + info.sources_consulted))
     research.failures = list(dict.fromkeys(research.failures + info.failures))
-    if search_evidence:
-        research.fb_evidence.append(search_evidence)
-    if company.facebook_url:
-        research.fb_evidence.append(
-            Evidence(
-                kind=EvidenceKind.FB_URL_INPUT, value=company.facebook_url,
-                source=f"input row {company.row_num}", excerpt="facebook_url provided as input (never fetched)",
-            )
-        )
 
     research.city = company.city or research.city or research.gbp_city
     if not research.hook and research.city:
@@ -194,7 +175,7 @@ def _fetch_page(url: str, fetcher: Fetcher, research: ResearchResult, *, check_r
 
 
 def _score(company: Company, research: ResearchResult, settings: Settings) -> Prospect:
-    """Name confidence per §7 (score.py). fb_signal §7.5 rules arrive in US3 (T018)."""
+    """Name confidence scoring (score.py)."""
     prospect = Prospect(company=company, research=research)
 
     email_inference = enrich.infer_from_email(company.email)
@@ -213,8 +194,6 @@ def _score(company: Company, research: ResearchResult, settings: Settings) -> Pr
             research.name_evidence.append(hunter_inference.evidence)
     score.apply_name_scoring(prospect, email_inference, hunter_inference)
 
-    prospect.fb_signal = score.classify_fb_signal(research.fb_evidence)
-    prospect.variant = score.select_variant(company.channel, prospect.fb_signal)
     if research.failures and not research.website:
         prospect.needs_review = True
     return prospect
@@ -223,7 +202,7 @@ def _score(company: Company, research: ResearchResult, settings: Settings) -> Pr
 def _write(
     prospect: Prospect, draft: Draft | None, vault_dir: Path, *, no_llm: bool, frozen: bool = False
 ) -> tuple[str, str]:
-    draft_md = vault.draft_markdown_for(draft, prospect, no_llm=no_llm and prospect.company.channel is Channel.EMAIL)
+    draft_md = vault.draft_markdown_for(draft, prospect, no_llm=no_llm)
     research_md = vault.build_research_markdown(prospect)
     # Rebuilt rather than carried: id assignment is deterministic over the same
     # research, so this reproduces exactly what the validator resolved against.
@@ -237,7 +216,7 @@ def _write(
     if frozen:
         detail = f"draft frozen (approved/sent), research refreshed, note {result}"
     elif draft is not None and draft.validated:
-        detail = f"drafted ({prospect.variant.value}), note {result}"
+        detail = f"drafted ({draft.source}), note {result}"
     elif draft is not None:
         detail = f"draft failed validation, note {result}"
     else:
@@ -248,13 +227,11 @@ def _write(
 def _count_drafting_path(summary: RunSummary, slug: str, draft: Draft | None) -> None:
     """Drafting-path visibility (FR-320).
 
-    Only email-channel drafts have a path: messenger DMs are deterministic and
-    frozen/--no-llm companies are not drafted at all, so neither is counted.
+    Frozen and --no-llm companies are not drafted at all, so they are not
+    counted.
     The fallback REASON is recorded, not just the count — a silent 40% fallback
     rate would otherwise look like slightly boring copy rather than a break."""
     if draft is None or draft.source not in ("agent", "template"):
-        return
-    if draft.model == "deterministic":  # messenger DM
         return
     if draft.source == "agent":
         summary.drafted_agent += 1
@@ -275,8 +252,6 @@ def _count(summary: RunSummary, prospect: Prospect) -> None:
         summary.named_medium += 1
     else:
         summary.named_none += 1
-    if prospect.company.channel is Channel.MESSENGER:
-        summary.messenger += 1
     if prospect.company.duplicate_of:
         summary.duplicates += 1
     if prospect.needs_review or prospect.company.needs_review:

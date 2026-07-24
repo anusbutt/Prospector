@@ -69,9 +69,9 @@ class CapSchedule:
 def collect_candidates(vault_dir: str | Path) -> tuple[list[SendCandidate], list[SendResult]]:
     """Return (approved & sendable candidates, skip-results for approved-but-unsendable).
 
-    Non-approved notes are ignored silently (not skip events). Approved notes that
-    are messenger-channel, lack a valid email, or lack a subject/body become
-    SKIPPED_NOT_SENDABLE results (FR-005, FR-013)."""
+    Non-approved notes are ignored silently (not skip events). Approved notes
+    that lack a valid email or a subject/body become SKIPPED_NOT_SENDABLE
+    results (FR-005, FR-013)."""
     vault_dir = Path(vault_dir)
     candidates: list[SendCandidate] = []
     skipped: list[SendResult] = []

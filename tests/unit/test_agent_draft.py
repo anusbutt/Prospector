@@ -35,7 +35,6 @@ from prospector.models import (
     DraftBlock,
     Evidence,
     EvidenceKind,
-    FbSignal,
     Prospect,
     ResearchResult,
 )
@@ -75,14 +74,6 @@ def make_prospect(*, name_used="team", city="Dallas", hook="22 years in business
             excerpt="Owner Scott Brenner founded Acme in 2003",
         )
     )
-    research.fb_evidence.append(
-        Evidence(
-            kind=EvidenceKind.FB_LINK,
-            value="https://facebook.com/acmeduct",
-            source="https://acmeduct.com",
-            excerpt="site links to a Facebook page",
-        )
-    )
     research.hook_evidence = Evidence(
         kind=EvidenceKind.HOOK_SOURCE,
         value=hook,
@@ -117,7 +108,7 @@ def good_response() -> AgentResponse:
 class TestEvidenceRefs:
     def test_ids_are_kind_and_ordinal(self):
         refs = build_evidence_refs(make_prospect().research)
-        assert [r.id for r in refs] == ["about_page_1", "fb_link_1", "hook_source_1"]
+        assert [r.id for r in refs] == ["about_page_1", "hook_source_1"]
 
     def test_evidence_ids_stable(self):
         """Identical research must yield identical ids (byte-idempotency)."""
@@ -429,10 +420,8 @@ class TestChannelClaims:
     def refs(self, prospect):
         return build_evidence_refs(prospect.research)
 
-    def fb_prospect(self, signal):
-        p = make_prospect()
-        p.fb_signal = signal
-        return p
+    def fb_prospect(self):
+        return make_prospect()
 
     @pytest.mark.parametrize(
         "text",
@@ -447,45 +436,40 @@ class TestChannelClaims:
             "It clears your DMs overnight.",
         ],
     )
-    def test_possessive_channel_claim_rejected_at_weak(self, text):
-        p = self.fb_prospect(FbSignal.WEAK)
+    def test_possessive_channel_claim_always_rejected(self, text):
+        p = self.fb_prospect()
         response = good_response()
         response.blocks[1] = DraftBlock(text, ["offer"])
         errors = validate_channel_claims(response, p)
         assert any("claims the prospect's own channel" in e for e in errors), text
 
-    def test_possessive_channel_claim_rejected_at_none(self):
-        p = self.fb_prospect(FbSignal.NONE)
+    def test_possessive_channel_claim_rejected_without_signal(self):
+        p = self.fb_prospect()
         response = good_response()
         response.blocks[1] = DraftBlock("It answers your Facebook page messages.", ["offer"])
         assert validate_channel_claims(response, p)
 
     def test_product_phrasing_is_always_allowed(self):
-        """Describing the product's capability is a product fact, at any signal."""
-        for signal in (FbSignal.NONE, FbSignal.WEAK, FbSignal.STRONG):
-            p = self.fb_prospect(signal)
-            response = good_response()
-            response.blocks[1] = DraftBlock(
-                "It answers Facebook page messages in seconds, day or night.", ["offer"]
-            )
-            assert validate_channel_claims(response, p) == [], signal
-
-    def test_strong_signal_still_needs_the_citation(self):
-        p = self.fb_prospect(FbSignal.STRONG)
+        """Describing the product's capability is a product fact, always allowed."""
+        p = self.fb_prospect()
         response = good_response()
-        response.blocks[1] = DraftBlock("It answers your Facebook page messages.", ["offer"])
-        errors = validate_channel_claims(response, p)
-        assert any("without citing the observed fb_* signal" in e for e in errors)
-
-    def test_strong_signal_with_fb_citation_is_allowed(self):
-        p = self.fb_prospect(FbSignal.STRONG)
-        response = good_response()
-        response.blocks[1] = DraftBlock("It answers your Facebook page messages.", ["fb_link_1"])
+        response.blocks[1] = DraftBlock(
+            "It answers Facebook page messages in seconds, day or night.", ["offer"]
+        )
         assert validate_channel_claims(response, p) == []
+
+    def test_no_citation_can_justify_a_possessive_channel_claim(self):
+        """008: channel signals are no longer researched, so nothing in the
+        evidence set can support "your page" — the rejection is unconditional."""
+        p = self.fb_prospect()
+        for cites in (["offer"], ["hook_source_1"], ["fb_link_1"]):
+            response = good_response()
+            response.blocks[1] = DraftBlock("It answers your Facebook page messages.", cites)
+            assert validate_channel_claims(response, p), cites
 
     def test_live_all_pro_draft_would_now_fall_back(self):
         """End-to-end proof the escaped draft is caught by the full validator."""
-        p = self.fb_prospect(FbSignal.WEAK)
+        p = self.fb_prospect()
         response = AgentResponse(
             subject="All Pro Duct - 10-day pilot",
             blocks=[

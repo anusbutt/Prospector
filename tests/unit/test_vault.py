@@ -1,4 +1,4 @@
-from prospector.models import Company, Confidence, Draft, FbSignal, Prospect, ResearchResult
+from prospector.models import Company, Confidence, Draft, Prospect, ResearchResult
 from prospector.vault import (
     assign_slugs,
     build_research_markdown,
@@ -104,20 +104,16 @@ class TestRenderNote:
             "hook: Boston service area",
             "website: bostonairduct.com",
             "angle: offer-led",
-            "fb_signal: none",
             "duplicate_of:",
             "needs_review: false",
             # 006: appended before tags. Empty here — render_note was called
             # without a draft, so no path produced this note's copy.
             "draft_source:",
             "outcome:",
-            # 007: appended before tags. Empty here — email-channel note with no
-            # input facebook_url and no discovered facebook.com signal.
-            "facebook_url:",
             "tags: [outreach, duct-cleaning, prospector]",
         ]
-        assert lines[1:18] == expected_prefixes
-        assert lines[18] == "---"
+        assert lines[1:16] == expected_prefixes
+        assert lines[16] == "---"
         assert "## Draft" in note and "## Research" in note and "## Log" in note
         assert note.index("## Draft") < note.index("## Research") < note.index("## Log")
         assert note.endswith("## Log\n-\n")

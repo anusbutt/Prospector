@@ -2,17 +2,14 @@ import pytest
 
 from prospector.enrich import NameInference, infer_from_email
 from prospector.models import (
-    Channel,
     Company,
     Confidence,
     Evidence,
     EvidenceKind,
-    FbSignal,
     Prospect,
     ResearchResult,
-    Variant,
 )
-from prospector.score import apply_name_scoring, classify_fb_signal, first_name_of, select_variant
+from prospector.score import apply_name_scoring, first_name_of
 
 
 def make_prospect(email=None, owner_name=None, name_evidence=()):
@@ -114,45 +111,6 @@ class TestNoneTier:
 
 def fb_ev(kind):
     return Evidence(kind=kind, value="x", source="https://site.test")
-
-
-class TestFbSignal:
-    def test_none_when_no_evidence(self):
-        assert classify_fb_signal([]) is FbSignal.NONE
-
-    @pytest.mark.parametrize(
-        "kind",
-        [EvidenceKind.FB_LINK, EvidenceKind.FB_URL_INPUT, EvidenceKind.FB_WIDGET, EvidenceKind.FB_SEARCH_ACTIVE],
-    )
-    def test_single_signal_is_weak_even_when_active(self, kind):
-        # default down: one signal alone never reaches strong (§7.5)
-        assert classify_fb_signal([fb_ev(kind)]) is FbSignal.WEAK
-
-    def test_two_signals_with_active_cue_is_strong(self):
-        evidence = [fb_ev(EvidenceKind.FB_LINK), fb_ev(EvidenceKind.FB_WIDGET)]
-        assert classify_fb_signal(evidence) is FbSignal.STRONG
-
-    def test_search_active_plus_input_url_is_strong(self):
-        evidence = [fb_ev(EvidenceKind.FB_URL_INPUT), fb_ev(EvidenceKind.FB_SEARCH_ACTIVE)]
-        assert classify_fb_signal(evidence) is FbSignal.STRONG
-
-    def test_two_soft_signals_stay_weak(self):
-        # link + input url but no observed activity: default down
-        evidence = [fb_ev(EvidenceKind.FB_LINK), fb_ev(EvidenceKind.FB_URL_INPUT)]
-        assert classify_fb_signal(evidence) is FbSignal.WEAK
-
-
-class TestVariantSelection:
-    def test_messenger_bucket_always_dm(self):
-        for signal in FbSignal:
-            assert select_variant(Channel.MESSENGER, signal) is Variant.MESSENGER_DM
-
-    def test_strong_gets_fb_variant(self):
-        assert select_variant(Channel.EMAIL, FbSignal.STRONG) is Variant.EMAIL_FB
-
-    def test_weak_and_none_get_agnostic(self):
-        assert select_variant(Channel.EMAIL, FbSignal.WEAK) is Variant.EMAIL_AGNOSTIC
-        assert select_variant(Channel.EMAIL, FbSignal.NONE) is Variant.EMAIL_AGNOSTIC
 
 
 class TestHelpers:

@@ -131,7 +131,7 @@ class TestMergeFreeze:
     def test_frozen_note_refreshes_other_machine_frontmatter(self):
         merged = merge_notes(EXISTING.format(status="sent"), FRESH, freeze_draft=True)
         frontmatter, _ = parse_note(merged)
-        assert frontmatter["fb_signal"] == "strong"  # machine-owned, from fresh
+        assert frontmatter["hook"] == "25 years in business"  # machine-owned, from fresh
         assert frontmatter["status"] == "sent"  # human-owned, preserved
 
     def test_unfrozen_draft_is_replaced(self):
@@ -154,13 +154,17 @@ class TestMergeFreeze:
         before = list(parse_note(EXISTING.format(status="approved"))[0])
         after = list(parse_note(merged)[0])
 
-        assert [k for k in after if k in before] == before, "existing keys reordered"
-        # 006 appended draft_source/outcome; 007 appended facebook_url — all
-        # before tags, none reordering the keys the note already had.
-        assert set(after) - set(before) == {"draft_source", "outcome", "facebook_url"}
+        # Keys the note had AND the schema still defines keep their relative order.
+        surviving = [k for k in before if k in after]
+        assert [k for k in after if k in surviving] == surviving, "existing keys reordered"
+        # 006 appended draft_source/outcome.
+        assert set(after) - set(before) == {"draft_source", "outcome"}
         assert after.index("draft_source") < after.index("tags")
         assert after.index("outcome") < after.index("tags")
-        assert after.index("facebook_url") < after.index("tags")
+        # 008: fb_signal left the schema, so the merge no longer emits it. The
+        # note converges on the current schema; no HUMAN-owned value is touched
+        # (status/outcome/Log are asserted elsewhere in this class).
+        assert "fb_signal" not in after
 
 
 class TestUpsertFreeze:

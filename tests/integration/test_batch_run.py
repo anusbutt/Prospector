@@ -36,7 +36,6 @@ class TestBatchRun:
         assert fm["status"] == "to-send"
         assert fm["name_used"] == "Scott"  # sourced from the /about page (US2)
         assert fm["name_confidence"] == "high"
-        assert fm["fb_signal"] == "none"
         assert "**Subject:** Free 10-day pilot for Acme Duct Cleaning" in note
         assert "Hi Scott," in note
         draft_section = note.split("## Draft")[1].split("## Research")[0]
@@ -74,25 +73,6 @@ class TestBatchRun:
         _, vault_dir = run_fixture_batch(tmp_path)
         fm = frontmatter((vault_dir / "beta-air-systems.md").read_text())
         assert fm["website"] == "betaair.com"
-
-    def test_messenger_row_gets_dm_draft(self, tmp_path, stubbed_network):
-        _, vault_dir = run_fixture_batch(tmp_path)
-        note = (vault_dir / "chat-only-cleaners.md").read_text()
-        fm = frontmatter(note)
-        assert fm["channel"] == "messenger"
-        assert fm["needs_review"] == "true"  # website unresolved
-        assert "Hey! I'm giving 5 duct cleaning companies a free 10-day pilot of the Omniveer Duct Lead Qualifier." in note
-        assert "**Subject:**" not in note  # DMs have no subject line
-
-    def test_strong_fb_signal_recorded_but_body_stays_neutral(self, tmp_path, stubbed_network):
-        # rev. 2: the signal is still researched and recorded, but the email
-        # copy is channel-neutral at every level — no their-activity phrasing
-        _, vault_dir = run_fixture_batch(tmp_path)
-        note = (vault_dir / "delta-fresh-air.md").read_text()
-        fm = frontmatter(note)
-        assert fm["fb_signal"] == "strong"  # widget (active) + footer link
-        assert "free 10-day pilot of the Omniveer Duct Lead Qualifier" in note
-        assert "messages your page" not in note.lower()
 
     def test_no_hook_row_still_gets_note_and_draft(self, tmp_path, stubbed_network):
         # rev. 2 copy has no locator slot; a hook-less row still drafts cleanly
