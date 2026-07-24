@@ -49,9 +49,9 @@ unless a user explicitly approves the corresponding note.
 
 ## Safety guarantees
 
-These constraints are enforced in code and tests. See
-[`.specify/memory/constitution.md`](.specify/memory/constitution.md) for the
-complete project principles.
+These constraints are enforced in code and tests, and are treated as hard
+requirements: a change that breaks one must be rejected. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for the rules contributors must preserve.
 
 | Guarantee | Enforcement |
 | --- | --- |
@@ -340,9 +340,7 @@ PROSPECTOR_SEND_NAME=Example Outreach
 ```
 
 Authentication is mandatory, TLS certificates are verified, and the SMTP
-username must match the sender address. See
-[`specs/004-provider-transport/quickstart.md`](specs/004-provider-transport/quickstart.md)
-for the complete setup guide.
+username must match the sender address.
 
 ### Gmail
 
@@ -421,8 +419,8 @@ prospect-specific claims. `draft_source` identifies the drafting path, and
   readable Markdown and survive repeated runs.
 - **Safe degradation.** Optional-service failures use documented fallbacks or
   reduce enrichment without weakening validation.
-- **Spec-driven development.** Product intent is in [`PRODUCT.md`](PRODUCT.md),
-  with implementation specifications under [`specs/`](specs/).
+- **Tested guarantees.** The safety constraints above are covered by the test
+  suite, so a regression that weakens them fails CI rather than shipping.
 
 ## Limitations
 

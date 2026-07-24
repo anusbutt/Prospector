@@ -1,16 +1,30 @@
-.env
+# Python
 .venv/
 __pycache__/
 *.pyc
 *.egg-info/
 .pytest_cache/
-Vault/
 build/
 dist/
-history/
-tests/
-samples/
+
+# Secrets & local runtime state
+.env
 secrets/
 *client_secret*.json
 send_ledger.jsonl
 dm_ledger.jsonl
+
+# Local data / scratch (not part of the distributed project)
+Vault/
+samples/
+
+# Internal development method — not part of the public project.
+# These stay on the maintainer's machine and are intentionally untracked.
+.specify/
+specs/
+.claude/
+history/
+CLAUDE.md
+PRODUCT.md
+PROGRESS.md
+lead_qualifier_feature.md
