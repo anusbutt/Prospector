@@ -12,7 +12,6 @@ every other missing-configuration case in this codebase behaves.
 """
 
 from dataclasses import dataclass, field
-from importlib.resources import files
 from pathlib import Path
 
 from prospector.config import ConfigError
@@ -21,10 +20,10 @@ from prospector.config import ConfigError
 # to write. Constraints deliberately precede the writing guidance so the rules
 # frame the craft advice rather than trailing it.
 REQUIRED_FILES = (
-    "agent/IDENTITY.md",
-    "agent/OFFER.md",
-    "agent/CONSTRAINTS.md",
-    "agent/skills/write-cold-email.md",
+    "IDENTITY.md",
+    "OFFER.md",
+    "CONSTRAINTS.md",
+    "skills/write-cold-email.md",
 )
 
 # ~5k tokens, leaving ample room for per-company evidence and the response
@@ -47,25 +46,24 @@ class InstructionSet:
         return len(self.text)
 
 
-def _read(root: Path | None, relative: str) -> str:
-    """Read one instruction file from the package, or from `root` in tests."""
+def _read(root: Path, relative: str) -> str:
+    """Read one instruction file from the selected profile's directory."""
     try:
-        if root is None:
-            return files("prospector").joinpath(relative).read_text(encoding="utf-8")
         return (Path(root) / relative).read_text(encoding="utf-8")
-    except (FileNotFoundError, NotADirectoryError, ModuleNotFoundError) as exc:
+    except (FileNotFoundError, NotADirectoryError) as exc:
         raise ConfigError(
-            f"instruction file not found: {relative}. It ships with the package "
-            f"and is required for drafting; restore it or reinstall."
+            f"instruction file not found: {relative}. It is required for "
+            f"drafting; add it to the profile."
         ) from exc
     except OSError as exc:
         raise ConfigError(f"instruction file could not be read: {relative} ({exc})") from exc
 
 
-def load_instructions(root: Path | None = None) -> InstructionSet:
+def load_instructions(root: Path) -> InstructionSet:
     """Load and bound every required instruction file.
 
-    `root` overrides the package location so tests can supply fixtures.
+    `root` is the selected profile's directory (008): instruction content is
+    per-vertical, so there is no package-wide default to fall back to.
     Raises ConfigError on a missing/unreadable file or an oversized assembly —
     never truncates, because a truncated CONSTRAINTS.md would silently drop
     hard rules, which is the worst available failure."""
@@ -82,7 +80,7 @@ def load_instructions(root: Path | None = None) -> InstructionSet:
     if len(text) > MAX_INSTRUCTION_CHARS:
         raise ConfigError(
             f"instruction context is {len(text):,} chars (max {MAX_INSTRUCTION_CHARS:,}). "
-            f"Trim the files in prospector/agent/ — they are never truncated "
+            f"Trim the files in {root} — they are never truncated "
             f"automatically, because dropping part of CONSTRAINTS.md would "
             f"silently weaken the honesty rules."
         )

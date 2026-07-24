@@ -3,6 +3,10 @@
 import pytest
 
 from prospector.config import ConfigError
+from pathlib import Path
+
+DUCT_PROFILE = Path("profiles/duct-cleaning")
+
 from prospector.instructions import (
     MAX_INSTRUCTION_CHARS,
     REQUIRED_FILES,
@@ -37,13 +41,13 @@ class TestLoading:
 
     def test_real_package_files_load(self):
         """The shipped files must actually load — not just fixtures."""
-        result = load_instructions()
+        result = load_instructions(DUCT_PROFILE)
         assert result.char_count > 1000
         assert "Omniveer" in result.text
         assert "https://www.omniveer.com/duct-lead-qualifier" in result.text
 
     def test_real_package_files_are_within_bound(self):
-        assert load_instructions().char_count <= MAX_INSTRUCTION_CHARS
+        assert load_instructions(DUCT_PROFILE).char_count <= MAX_INSTRUCTION_CHARS
 
 
 class TestFailsLoudly:
@@ -55,17 +59,17 @@ class TestFailsLoudly:
         assert missing in str(exc.value)
 
     def test_empty_file_names_it(self, fixture_root):
-        (fixture_root / "agent/OFFER.md").write_text("   \n", encoding="utf-8")
+        (fixture_root / "OFFER.md").write_text("   \n", encoding="utf-8")
         with pytest.raises(ConfigError) as exc:
             load_instructions(fixture_root)
-        assert "agent/OFFER.md" in str(exc.value)
+        assert "OFFER.md" in str(exc.value)
         assert "empty" in str(exc.value)
 
     def test_oversize_fails_loudly(self, fixture_root):
         """FR-325: exceeding the cap fails; it MUST NOT truncate silently.
 
         A truncated CONSTRAINTS.md would drop hard rules invisibly."""
-        (fixture_root / "agent/OFFER.md").write_text("x" * (MAX_INSTRUCTION_CHARS + 1), encoding="utf-8")
+        (fixture_root / "OFFER.md").write_text("x" * (MAX_INSTRUCTION_CHARS + 1), encoding="utf-8")
         with pytest.raises(ConfigError) as exc:
             load_instructions(fixture_root)
         message = str(exc.value)
@@ -73,7 +77,7 @@ class TestFailsLoudly:
         assert "truncated" in message or "never truncated" in message
 
     def test_no_truncated_result_is_ever_returned(self, fixture_root):
-        (fixture_root / "agent/OFFER.md").write_text("x" * (MAX_INSTRUCTION_CHARS + 1), encoding="utf-8")
+        (fixture_root / "OFFER.md").write_text("x" * (MAX_INSTRUCTION_CHARS + 1), encoding="utf-8")
         with pytest.raises(ConfigError):
             load_instructions(fixture_root)
 
@@ -83,12 +87,12 @@ class TestContentIsNotCode:
         """Constitution: instruction files MUST NOT contain credentials."""
         import re
 
-        text = load_instructions().text
+        text = load_instructions(DUCT_PROFILE).text
         assert not re.search(r"(api[_-]?key|password|secret|bearer\s+\w)", text, re.I)
 
     def test_shipped_offer_carries_exactly_one_product_url(self):
         from prospector.instructions import _read
 
-        offer = _read(None, "agent/OFFER.md")
+        offer = _read(DUCT_PROFILE, "OFFER.md")
         assert offer.count("http") == 1
         assert "https://www.omniveer.com/duct-lead-qualifier" in offer

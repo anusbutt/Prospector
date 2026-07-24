@@ -1,0 +1,26 @@
+# Per-vertical constants for the duct-cleaning offer (008).
+# Content, not code: reviewed like prose, never a place for secrets.
+
+tags = [
+  "outreach",
+  "duct-cleaning",
+  "prospector",
+]
+
+signature = "Anas\nFounder, Omniveer"
+
+product_url = "https://www.omniveer.com/duct-lead-qualifier"
+
+keywords = [
+  "duct cleaning",
+  "air duct cleaning",
+]
+
+banned_claims = [
+  "your ads",
+  "ad campaign",
+  "running ads",
+  "advertis",
+  "your facebook ads",
+  "ad spend",
+]

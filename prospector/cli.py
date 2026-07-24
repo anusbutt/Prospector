@@ -30,9 +30,42 @@ def main():
     """Prospector: research companies on the open web, draft outreach into an Obsidian vault."""
 
 
+def _resolve_profile(settings, requested: str | None):
+    """Select and validate the offer profile before any work happens (008).
+
+    An explicit name wins; otherwise the operator is asked. A non-interactive
+    run (CI, a pipe, cron) must FAIL rather than block on a prompt nobody can
+    answer, so the available names are printed and the run stops."""
+    import sys
+
+    from prospector.profiles import discover
+
+    name = requested or settings.profile
+    if not name:
+        available = discover()
+        if not available:
+            raise ConfigError(
+                "no profiles found. Create profiles/<name>/ with OFFER.md, "
+                "IDENTITY.md, CONSTRAINTS.md, skills/write-cold-email.md, "
+                "fallback.md and profile.toml."
+            )
+        if not sys.stdin.isatty():
+            raise ConfigError(
+                f"no profile selected. Pass --profile <name> "
+                f"(available: {', '.join(available)})."
+            )
+        typer.echo("Available profiles:")
+        for i, candidate in enumerate(available, start=1):
+            typer.echo(f"  {i}) {candidate}")
+        choice = typer.prompt("Which profile?", default="1")
+        name = available[int(choice) - 1] if choice.isdigit() else choice
+    return settings.require_profile(name)
+
+
 @app.command()
 def run(
     input: Path = typer.Argument(..., help="CSV or markdown-table file of companies"),
+    profile: str = typer.Option(None, "--profile", help="Offer profile to use (prompts when omitted)"),
     vault: Path = typer.Option(None, "--vault", help="Vault output folder (default: Vault/Outreach)"),
     limit: int = typer.Option(None, "--limit", help="Process only the first N companies"),
     only: str = typer.Option(None, "--only", help="Re-run a single company by slug"),
@@ -45,11 +78,11 @@ def run(
     settings = load_settings()
     instructions = None
     try:
+        # FR-018: the profile is validated first — a broken one costs nothing.
+        selected = _resolve_profile(settings, profile)
         if not no_llm:
             settings.require_llm()
-            # FR-323: a missing or oversized instruction file stops the run
-            # before any company is processed and before anything is written.
-            instructions = settings.require_instructions()
+            instructions = selected.instructions
         if not input.is_file():
             raise IngestError(f"input file not found: {input}")
         summary = run_batch(
@@ -73,7 +106,8 @@ def run(
 
 @app.command()
 def source(
-    keyword: str = typer.Option("duct cleaning", "--keyword", help="Service keyword for the Places text query"),
+    profile: str = typer.Option(None, "--profile", help="Offer profile to use (prompts when omitted)"),
+    keyword: str = typer.Option(None, "--keyword", help="Service keyword (default: the profile's first keyword)"),
     metros: Path = typer.Option(None, "--metros", help="Metro list file (City, ST per line; default: bundled 30-metro list)"),
     out: Path = typer.Option(Path("candidates.csv"), "--out", help="Output CSV path"),
     keep_all: bool = typer.Option(False, "--all", help="Keep every discovered candidate (default: only ad_signal: pixel)"),
@@ -86,6 +120,9 @@ def source(
 
     settings = load_settings()
     try:
+        selected = _resolve_profile(settings, profile)
+        if not keyword:
+            keyword = selected.keywords[0]
         settings.require_places()
         metro_list = load_metros(metros)
         out_parent = out.resolve().parent
