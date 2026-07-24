@@ -1,5 +1,50 @@
 <!--
 Sync Impact Report
+- Version change: 5.0.0 → 6.0.0 (2026-07-24)
+- Reason: a guarded, assisted-manual Messenger delivery path is added alongside
+  the existing email send. Principle I previously excluded Messenger and browser
+  automation as delivery channels outright ("never any other channel (no browser
+  automation, no Messenger send)"). That absolute exclusion is REDEFINED into a
+  narrow, guarded exception (MAJOR bump: principle redefinition). Approved by the
+  human 2026-07-24; enables feature 007-assisted-messenger.
+- Modified principles:
+  - I (Human-Approved Sending Only) — REDEFINED: the tool MAY now ASSIST a
+    human-performed Messenger delivery — copy an approved messenger-channel
+    note's deterministic draft body to the operator's clipboard and open the
+    note's `facebook_url` in the operator's OWN browser via the OS default-
+    browser handoff — but MUST NOT itself transmit any Messenger/Facebook
+    message, MUST NOT drive or automate a browser (no Playwright/Selenium/
+    headless automation of Facebook), and MUST NOT issue any HTTP request to a
+    Facebook/Messenger host. Every existing send guardrail is preserved on this
+    path: approved-only, dry-run/preview default (real mode requires an explicit
+    flag AND a per-note human confirmation), an immutable dedicated Messenger
+    ledger (slug-deduped, recording a human-performed delivery with no automated
+    message id), never auto-approve, the only automatic status transition is
+    approved→sent, and copy is delivered verbatim (the deterministic template —
+    no LLM call on this path). The email send path is UNCHANGED.
+  - II (Open Web Only — Facebook Is Never Accessed) — CLARIFIED, nothing
+    relaxed: handing a `facebook_url` to the operator's own browser via the OS
+    browser handoff is NOT a tool fetch/scrape/crawl/login and does not violate
+    "the URL is never fetched." The tool itself still issues no network request
+    to any Facebook host; the outbound host guard remains the sole authority
+    blocking Facebook traffic.
+- Modified constraints: the messenger note in Additional Constraints now records
+  that the deterministic messenger draft MAY be delivered via the assisted-
+  manual path, and messenger notes carry a `facebook_url` frontmatter field
+  (sourced from input `facebook_url` or a discovered active-Facebook signal;
+  this is an input/target field only and does not change Principle II).
+- Added sections: none. Removed sections: none.
+- Templates requiring updates: ✅ .specify/templates/plan-template.md
+  (Constitution Check gates verified compatible — no channel-specific gate) ✅
+  spec-template.md (no change required) ✅ tasks-template.md (no change required)
+  ⚠ PRODUCT.md — assisted-manual Messenger delivery + `facebook_url` field
+  (reconcile during 007 plan) ⚠ README.md — "Facebook is never contacted" and
+  Messenger review-workflow wording (reconcile during 007 implementation)
+- Follow-up TODOs: none.
+-->
+
+<!--
+Sync Impact Report
 - Version change: 4.0.1 → 5.0.0 (2026-07-20)
 - Reason: drafting moves from locked-template slot-filling to agent-written
   personalized prose, constrained by versioned markdown instruction/skill files,
@@ -174,12 +219,13 @@ a change that violates one MUST be rejected or the constitution amended first.
 ### I. Human-Approved Sending Only (Draft-First, Guarded Send)
 
 The tool drafts by default and MUST NOT send anything a human has not explicitly
-marked `status: approved` in the vault. When it sends, it MUST:
+marked `status: approved` in the vault. When it sends email, it MUST:
 
 - send **only email**, through exactly one of two configured providers — the
   **Gmail API** or **authenticated SMTP** (SSL or STARTTLS, e.g. a Zoho
-  custom-domain mailbox) — and never any other channel (no browser automation,
-  no Messenger send);
+  custom-domain mailbox). The email send path itself performs no other-channel
+  delivery; Messenger delivery is handled only by the separate assisted-manual
+  path below, and no delivery path may drive or automate a browser;
 - send **only from the configured dedicated outreach mailbox**
   (`PROSPECTOR_SEND_FROM`, required — no hardcoded default) — **never** the
   operator's personal account. Before any send the authenticated identity
@@ -216,16 +262,60 @@ what keeps "human-approved" meaningful once copy is model-written: approval
 attaches to specific words, so generating copy after approval would deliver
 something no human ever read.*
 
+**Assisted-manual Messenger delivery** *(added 2026-07-24, v6.0.0)*. For
+`approved` messenger-channel notes the tool MAY assist — but never perform — a
+human-driven send. When it assists, it MUST:
+
+- **prepare, not transmit**: copy the note's deterministic draft body to the
+  operator's clipboard and open the note's `facebook_url` in the operator's
+  **own** browser via the OS default-browser handoff. The tool MUST NOT itself
+  send any Messenger/Facebook message, MUST NOT drive or automate a browser (no
+  Playwright/Selenium/headless control of Facebook), and MUST NOT issue any HTTP
+  request to a Facebook/Messenger host — the human performs the actual send
+  (Principle II governs the fetch boundary and is unchanged);
+- **deliver only the approved words verbatim**: the body is the deterministic
+  Messenger template already written at `run` time. No copy is generated,
+  rewritten, or altered on this path, and no LLM call occurs;
+- **default to preview**: real mode (clipboard write + browser open) requires an
+  explicit flag; absent it the tool only reports what it *would* walk, opening
+  no browser and writing nothing. Preview MUST make no external request;
+- **require a per-note human confirmation** before recording anything; declining
+  leaves the note `approved` and unrecorded;
+- **append every confirmed delivery to a dedicated, immutable Messenger ledger**
+  (note, company, Facebook target, timestamp, human-performed marker; no
+  automated message id) — separate from the email send ledger so email cap
+  accounting is unaffected — and skip any note already recorded there, so a
+  prospect is never delivered twice;
+- **transition status only approved→sent**, the single automatic status write
+  this path may make, leaving all other note content byte-identical; never
+  auto-approve.
+
+*Rationale: Messenger prospects already receive a finished deterministic draft,
+but delivering it was fully manual and error-prone. Letting the tool prepare the
+clipboard and open the page — while the human remains the sole party that touches
+Facebook and clicks send — removes the toil without crossing the line the product
+is built on: no automated Facebook contact, no browser automation, no message the
+human did not approve. The bright-line "no Messenger send / no browser
+automation" is preserved as literal truth about what the **tool** does; what is
+newly permitted is assisting a **human** who does it themselves.*
+
 ### II. Open Web Only — Facebook Is Never Accessed
 
 The tool MUST NOT use the Facebook Graph API, any Facebook MCP server, or any
 form of Facebook scraping, crawling, or authenticated access. A `facebook_url`
-is a valid *input* field (it confirms the business; a vanity URL may hint a
-name), but the URL is never fetched, the page is never scraped, and no login to
-Facebook ever occurs. Owner data and channel-fit signals come exclusively from
-the open web: the company website, Google (Places API / search results),
-email-pattern inference, optional enrichment (Hunter.io), and optional public
-business registries.
+is a valid *input/target* field (it confirms the business; a vanity URL may hint
+a name; and it is the target the operator's own browser is pointed at during
+assisted-manual Messenger delivery per Principle I), but the tool never fetches
+the URL, never scrapes the page, and never logs in to Facebook. Owner data and
+channel-fit signals come exclusively from the open web: the company website,
+Google (Places API / search results), email-pattern inference, optional
+enrichment (Hunter.io), and optional public business registries.
+
+*Clarification (2026-07-24, v6.0.0): handing a `facebook_url` to the operator's
+own browser via the OS default-browser handoff is NOT a tool fetch, scrape,
+crawl, or login — the tool issues no network request to any Facebook host, and
+the outbound host guard remains the sole authority blocking such traffic. This
+does not relax anything: the tool still never accesses Facebook itself.*
 
 *Rationale: the Graph API cannot grant the needed access, scraping FB is
 login-walled, brittle, and ToS-violating — decided and settled in PRODUCT.md §5.*
@@ -351,6 +441,12 @@ verifiably works.
   committed, never logged.
 - **Input**: CSV or markdown table with minimum `company`, `email`; blank /
   `messenger` / a Facebook URL in the email field routes to the messenger bucket.
+- **Messenger notes**: carry a `facebook_url` frontmatter field (the assisted-
+  manual delivery target), populated from the input `facebook_url` or a
+  discovered active-Facebook signal, empty when neither exists — an input/target
+  field only, never fetched by the tool (Principle II). Their deterministic
+  draft MAY be delivered via the assisted-manual Messenger path (Principle I):
+  the tool prepares clipboard + browser, the human sends.
 - **Fallback templates are locked** (PRODUCT.md §8): on the deterministic
   fallback path the LLM fills bracketed slots only, and template prose is not
   paraphrased or restyled by the model. This path MUST remain functional and
@@ -396,4 +492,4 @@ verifiably works.
 - **Compliance review**: every plan and PR is checked against Principles I–VII
   before merge; violations block until resolved or the constitution is amended.
 
-**Version**: 5.0.0 | **Ratified**: 2026-07-13 | **Last Amended**: 2026-07-20
+**Version**: 6.0.0 | **Ratified**: 2026-07-13 | **Last Amended**: 2026-07-24

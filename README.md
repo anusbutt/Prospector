@@ -43,6 +43,8 @@ unless a user explicitly approves the corresponding note.
 - Preserve human-owned content across repeated runs.
 - Deliver approved drafts through Gmail or authenticated SMTP with dry-run
   defaults, daily caps, pacing, and duplicate-send protection.
+- Assist manual Messenger delivery: copy an approved draft to the clipboard and
+  open the prospect's Facebook page in your own browser — you send it yourself.
 
 ## Safety guarantees
 
@@ -53,7 +55,7 @@ complete project principles.
 | Guarantee | Enforcement |
 | --- | --- |
 | Human approval is required | `prospector send` considers only notes with `status: approved`. It previews by default; real delivery requires `--send` and confirmation unless `--yes` is supplied. |
-| Facebook is never contacted | All outbound HTTP traffic passes through a guard that rejects Facebook and Messenger hosts before network activity. Facebook URLs are stored only as input signals. |
+| Facebook is never contacted | All outbound HTTP traffic passes through a guard that rejects Facebook and Messenger hosts before network activity. Facebook URLs are stored only as input/target signals. Assisted Messenger delivery (`prospector dm`) never sends a message or automates a browser — it hands the URL to your own browser, and you send it yourself. |
 | Names are never fabricated | Deterministic code extracts and scores names. Only high-confidence, source-backed names are used; the model does not choose the greeting. |
 | Prospect claims require evidence | Every agent-written prose block cites captured research records. A deterministic validator rejects missing or invalid citations. |
 | Unsupported claims are rejected | Invalid or unverifiable copy is rejected and replaced with a locked template. |
@@ -210,6 +212,24 @@ prospector send --send --yes
 
 `prospector send` is a dry-run unless `--send` is present.
 
+### Deliver approved Messenger drafts (assisted-manual)
+
+```bash
+prospector dm
+prospector dm --send
+prospector dm --send --limit 5
+prospector dm --send --yes
+```
+
+`prospector dm` walks approved `channel: messenger` notes one at a time. With
+`--send`, for each note it copies the draft to your clipboard and opens the
+company's Facebook page in your own browser; you paste, send it yourself, then
+confirm. Confirmed deliveries are recorded in `dm_ledger.jsonl` (so a prospect is
+never queued twice) and the note flips to `sent`. Without `--send` it only
+previews. The tool never sends a Messenger message, never automates a browser,
+and never contacts Facebook — only your browser does. Notes with no Facebook link
+on file are still shown so you can locate the company manually.
+
 ### Exit codes
 
 | Command | Code | Meaning |
@@ -268,6 +288,8 @@ Uncertain evidence always scores down rather than up.
 5. Change `status: to-send` to `status: approved` when the message is ready.
 6. Run `prospector send` to preview the batch.
 7. Run `prospector send --send` to deliver it.
+8. For `channel: messenger` notes, run `prospector dm --send` to be walked
+   through assisted-manual delivery (clipboard + your browser; you send).
 
 Prospector preserves user-edited statuses, `## Log` entries, and custom sections
 across research runs. During real delivery, the only automatic user-visible

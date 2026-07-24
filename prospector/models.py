@@ -245,6 +245,79 @@ class RunReport:
         )
 
 
+class DmOutcome(str, Enum):
+    """Per-note result of the assisted-manual Messenger walk (007 data-model.md)."""
+
+    DELIVERED = "delivered"  # human confirmed a manual send; ledgered + status flipped
+    SKIPPED_NOT_SENDABLE = "skipped_not_sendable"  # approved messenger note with no body
+    SKIPPED_ALREADY_SENT = "skipped_already_sent"  # in DM ledger, or dup target in-run
+    DECLINED = "declined"  # operator chose not to confirm; note stays approved
+    WOULD_DELIVER = "would_deliver"  # preview/dry-run: eligible, nothing done
+
+
+@dataclass
+class DmCandidate:
+    """A deliverable view of one approved messenger-channel note (007 data-model.md).
+
+    Distinct from SendCandidate: there is no email/subject, and a missing
+    facebook_url is NOT an error — it is delivered with a 'no link' notice (FR-019)."""
+
+    slug: str
+    company: str
+    facebook_url: str | None
+    body: str | None
+    note_path: "Path"
+    approved_at: float = 0.0  # note mtime; oldest-approved-first ordering
+
+    def sendable_error(self) -> str | None:
+        """Reason this note is NOT deliverable, else None. Channel is filtered
+        during collection; here only the body must be present (FR-010)."""
+        if not self.body or not self.body.strip():
+            return "draft has no body"
+        return None
+
+
+@dataclass
+class DmResult:
+    slug: str
+    facebook_url: str | None
+    outcome: DmOutcome
+    detail: str = ""
+
+
+@dataclass
+class DmRunReport:
+    dry_run: bool = True
+    results: list["DmResult"] = field(default_factory=list)
+
+    def count(self, outcome: DmOutcome) -> int:
+        return sum(1 for r in self.results if r.outcome == outcome)
+
+    @property
+    def delivered(self) -> int:
+        return self.count(DmOutcome.DELIVERED)
+
+    @property
+    def would_deliver(self) -> int:
+        return self.count(DmOutcome.WOULD_DELIVER)
+
+    @property
+    def declined(self) -> int:
+        return self.count(DmOutcome.DECLINED)
+
+    @property
+    def skipped_not_sendable(self) -> int:
+        return self.count(DmOutcome.SKIPPED_NOT_SENDABLE)
+
+    @property
+    def skipped_already(self) -> int:
+        return self.count(DmOutcome.SKIPPED_ALREADY_SENT)
+
+    @property
+    def skipped(self) -> int:
+        return self.skipped_not_sendable + self.skipped_already
+
+
 @dataclass
 class RunSummary:
     total: int = 0

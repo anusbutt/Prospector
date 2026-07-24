@@ -224,4 +224,33 @@ draft / to-send ──(human sets)──▶ approved ──(prospector send --se
 
 Dry-run performs **no** authentication and opens **no** connection under either provider.
 
-**Non-goals:** no personal-account sending, no non-email channel (no Messenger send), no bulk/unapproved/over-cap send, no transactional-ESP or general-purpose sender, no open/click tracking, no From-alias allowlist (a future feature may add one; until then From == authenticated identity, always).
+**Non-goals:** no personal-account sending, no *automated* Messenger/Facebook send by the tool (assisted-manual delivery — §12 — is a human-performed send), no bulk/unapproved/over-cap send, no transactional-ESP or general-purpose sender, no open/click tracking, no From-alias allowlist (a future feature may add one; until then From == authenticated identity, always).
+
+## 12. Assisted-manual Messenger delivery (`prospector dm`) — feature 007
+
+Messenger-bucket notes already carry a finished deterministic draft (§8), but
+delivering it was fully manual. `prospector dm` assists — without ever performing
+— a human send (Constitution v6.0.0, Principle I "Assisted-manual Messenger
+delivery"). For each `approved` `channel: messenger` note it copies the draft to
+the operator's clipboard and opens the note's `facebook_url` in the operator's
+**own** browser; the operator sends it themselves and confirms. On confirmation
+the delivery is appended to a dedicated `dm_ledger.jsonl` (slug-deduped, so a
+prospect is never queued twice) and the note flips `approved → sent`.
+
+- **Preview by default.** Real mode (`--send`) requires the explicit flag AND a
+  per-note human confirmation; preview opens no browser and records nothing.
+- **The tool never contacts Facebook.** It issues no HTTP request to any Facebook
+  host and never automates a browser (`webbrowser.open` hands the URL to the
+  operator's browser — Principle II clarification, v6.0.0). The §4 outbound host
+  guard remains in force.
+- **Copy is verbatim.** The deterministic §8 Messenger DM is delivered unchanged;
+  no LLM call occurs on this path.
+- **`facebook_url` frontmatter field.** Messenger notes carry a machine-readable
+  `facebook_url` (from the input `facebook_url` or a discovered active-Facebook
+  signal, §7.5), the assisted-delivery target — an input/target field only, never
+  fetched. Notes with no link are still presented so the operator can locate the
+  company manually.
+
+**Non-goals:** no automated Messenger/Facebook message send, no browser
+automation, no Facebook API/scraping/login, no reply/outcome tracking beyond the
+human-owned `outcome` field, no cap/pacing ramp for manual delivery.
