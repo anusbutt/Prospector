@@ -28,4 +28,10 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run tests
+        # NO_COLOR keeps Typer/Rich help output plain. With colour enabled, Rich
+        # injects ANSI escapes inside option tokens (e.g. "--vault"), which
+        # breaks the CLI help assertions.
+        env:
+          NO_COLOR: "1"
+          TERM: dumb
         run: pytest -q
