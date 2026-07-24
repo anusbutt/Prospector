@@ -20,6 +20,7 @@ unless a user explicitly approves the corresponding note.
 - [Safety guarantees](#safety-guarantees)
 - [How it works](#how-it-works)
 - [Installation](#installation)
+- [Running the CLI](#running-the-cli)
 - [Configuration](#configuration)
 - [Usage](#usage)
 - [Input format](#input-format)
@@ -137,6 +138,30 @@ cp .env.example .env
 ```
 
 On Windows PowerShell, use `Copy-Item .env.example .env` instead of `cp`.
+
+## Running the CLI
+
+With the virtual environment active, invoke the tool directly:
+
+```bash
+prospector --help
+```
+
+If `prospector` is not found — common when the environment cannot be activated,
+for example when it was created under a different path — call the entry point by
+its full path, or define a shell alias:
+
+```bash
+.venv/bin/prospector --help                          # always works
+alias prospector='/absolute/path/to/Prospector/.venv/bin/prospector'
+```
+
+Run commands from the project directory: `.env`, `Vault/`, and
+`send_ledger.jsonl` all resolve relative to the current working directory.
+
+Windows users should install and run Prospector inside WSL rather than CMD or
+PowerShell. The package lives in the Linux virtual environment, so `prospector`
+does not exist at a Windows prompt.
 
 ## Configuration
 
