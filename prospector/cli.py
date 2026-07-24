@@ -201,6 +201,96 @@ def _print_send_report(report) -> None:
             typer.echo(f"  {r.slug.ljust(width)}  {r.outcome.value:12}  {r.detail}")
 
 
+@app.command()
+def dm(
+    real: bool = typer.Option(False, "--send", help="Assist a real send (clipboard + browser + confirm). Default is preview."),
+    limit: int = typer.Option(None, "--limit", help="Walk at most N approved messenger notes this run"),
+    vault: Path = typer.Option(None, "--vault", help="Vault folder (default: Vault/Outreach)"),
+    yes: bool = typer.Option(False, "--yes", help="Skip the one upfront confirmation (per-note confirms still apply)"),
+):
+    """Assist manual Messenger delivery of approved messenger-channel notes
+    (Constitution v6.0.0 Principle I). The tool copies the draft to your
+    clipboard and opens the company's Facebook page in YOUR browser; you send it
+    yourself and confirm. Preview by default — nothing is opened or recorded."""
+    import webbrowser
+
+    from prospector import clipboard
+    from prospector.dm import run_dm
+    from prospector.models import DmCandidate
+
+    settings = load_settings()
+    target = vault or settings.vault_dir
+    if not target.is_dir():
+        typer.echo(f"error: vault folder not found: {target}", err=True)
+        raise typer.Exit(1)
+
+    if real and not yes:
+        preview = run_dm(settings, vault_dir=target, dry_run=True, limit=limit)
+        typer.echo(
+            f"About to walk {preview.would_deliver} approved messenger note(s); "
+            f"you will confirm each send yourself."
+        )
+        if not typer.confirm("Proceed?"):
+            typer.echo("aborted; nothing done.")
+            raise typer.Exit(0)
+
+    def _confirm(cand: "DmCandidate", *, copied: bool, opened: bool) -> str:
+        typer.echo("")
+        typer.echo(f"── {cand.company} ({cand.slug}) ──")
+        if opened:
+            typer.echo(f"  opened in your browser: {cand.facebook_url}")
+        elif cand.facebook_url:
+            typer.echo(f"  could not open a browser — open this yourself: {cand.facebook_url}")
+        else:
+            typer.echo("  no Facebook link on file — locate the company manually")
+        if copied:
+            typer.echo("  draft copied to your clipboard — paste it into Messenger")
+        else:
+            typer.echo("  (clipboard unavailable — copy the message below)")
+            typer.echo("")
+            typer.echo(cand.body or "")
+        answer = typer.prompt("  Did you send this message? [y/N/q]", default="n", show_default=False)
+        return answer
+
+    report = run_dm(
+        settings,
+        vault_dir=target,
+        dry_run=not real,
+        limit=limit,
+        confirm=_confirm,
+        opener=webbrowser.open,
+        copier=clipboard.copy_to_clipboard,
+    )
+    _print_dm_report(report, target)
+
+
+def _print_dm_report(report, vault_dir) -> None:
+    from prospector.models import DmOutcome
+
+    mode = "ASSISTED SEND" if not report.dry_run else "WOULD WALK (preview)"
+    typer.echo(f"\nProspector dm [{mode}]")
+    typer.echo(f"  vault: {vault_dir}")
+    head = "delivered" if not report.dry_run else "to walk"
+    head_n = report.delivered if not report.dry_run else report.would_deliver
+    typer.echo(
+        f"  {head}: {head_n}   skipped (already): {report.skipped_already}   "
+        f"skipped (not sendable): {report.skipped_not_sendable}   declined: {report.declined}"
+    )
+    interesting = {
+        DmOutcome.DELIVERED,
+        DmOutcome.WOULD_DELIVER,
+        DmOutcome.SKIPPED_NOT_SENDABLE,
+        DmOutcome.SKIPPED_ALREADY_SENT,
+    }
+    rows = [r for r in report.results if r.outcome in interesting]
+    if rows:
+        typer.echo("")
+        width = max(len(r.slug) for r in rows)
+        for r in rows:
+            detail = r.facebook_url or r.detail
+            typer.echo(f"  {r.slug.ljust(width)}  {r.outcome.value:20}  {detail}")
+
+
 def _print_sourcing_summary(summary) -> None:
     typer.echo(f"\nProspector source: {summary.metros_covered}/{summary.metros_total} metros covered")
     typer.echo(f"  queries used: {summary.queries_used}/{summary.query_budget}")

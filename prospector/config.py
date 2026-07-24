@@ -17,6 +17,7 @@ DEFAULT_SMTP_SECURITY = "ssl"  # implicit TLS (port 465); or "starttls" (587)
 DEFAULT_SEND_CAPS = "15,30,60,100"  # weekly ramp; last value applies to week 4+
 DEFAULT_SEND_DELAY = "30,90"  # randomized seconds between real sends: min,max
 DEFAULT_LEDGER = "send_ledger.jsonl"
+DEFAULT_DM_LEDGER = "dm_ledger.jsonl"  # assisted-manual Messenger deliveries (007)
 DEFAULT_GMAIL_CLIENT = "secrets/gmail_client_secret.json"
 DEFAULT_GMAIL_TOKEN = "secrets/gmail_token.json"
 
@@ -47,6 +48,7 @@ class Settings:
     send_caps: list[int] = field(default_factory=lambda: [15, 30, 60, 100])
     send_delay: tuple[int, int] = (30, 90)
     ledger_path: Path = field(default_factory=lambda: Path(DEFAULT_LEDGER))
+    dm_ledger_path: Path = field(default_factory=lambda: Path(DEFAULT_DM_LEDGER))
     gmail_client_secret_path: Path = field(
         default_factory=lambda: Path(DEFAULT_GMAIL_CLIENT)
     )
@@ -196,6 +198,7 @@ def load_settings(env_file: str | Path = ".env") -> Settings:
         send_caps=_parse_caps(os.environ.get("PROSPECTOR_SEND_CAPS") or DEFAULT_SEND_CAPS),
         send_delay=_parse_delay(os.environ.get("PROSPECTOR_SEND_DELAY") or DEFAULT_SEND_DELAY),
         ledger_path=Path(os.environ.get("PROSPECTOR_LEDGER") or DEFAULT_LEDGER),
+        dm_ledger_path=Path(os.environ.get("PROSPECTOR_DM_LEDGER") or DEFAULT_DM_LEDGER),
         gmail_client_secret_path=Path(
             os.environ.get("PROSPECTOR_GMAIL_CLIENT") or DEFAULT_GMAIL_CLIENT
         ),

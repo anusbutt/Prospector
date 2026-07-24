@@ -9,7 +9,27 @@ import unicodedata
 from pathlib import Path
 from urllib.parse import urlparse
 
-from prospector.models import Company, Draft, Prospect
+from prospector.models import Company, Draft, EvidenceKind, Prospect, ResearchResult
+
+# Evidence kinds whose `value` is a usable facebook.com page URL (not a script
+# marker like FB_WIDGET/FB_EMBED) — the assisted-manual delivery target (007 R3).
+_FB_TARGET_KINDS = (
+    EvidenceKind.FB_URL_INPUT,
+    EvidenceKind.FB_SEARCH_ACTIVE,
+    EvidenceKind.FB_LINK,
+)
+
+
+def _resolve_facebook_url(company: Company, research: ResearchResult) -> str | None:
+    """The messenger delivery target (007 FR-017/R3): explicit input first, else
+    the first discovered facebook.com page URL, else None. No network access —
+    this only reads already-recorded fields (Constitution II)."""
+    if company.facebook_url:
+        return company.facebook_url
+    for ev in research.fb_evidence:
+        if ev.kind in _FB_TARGET_KINDS and "facebook.com" in (ev.value or "").lower():
+            return ev.value
+    return None
 
 FRONTMATTER_KEYS = (
     "company",
@@ -29,6 +49,10 @@ FRONTMATTER_KEYS = (
     # the first re-run produces content diffs, not 130 reorderings.
     "draft_source",
     "outcome",
+    # 007: appended (not inserted) so pre-007 notes keep their key order and the
+    # first re-run produces a content diff, not a full reordering. The assisted-
+    # manual Messenger delivery target; input/target only, never fetched (II).
+    "facebook_url",
     "tags",
 )
 
@@ -119,6 +143,8 @@ def render_note(
         "draft_source": draft.source if draft is not None else None,
         # Human-owned: written empty on creation and never machine-set again.
         "outcome": None,
+        # 007: assisted-manual Messenger delivery target (never fetched — II).
+        "facebook_url": _resolve_facebook_url(company, prospect.research),
         "tags": None,  # rendered specially below
     }
     lines = ["---"]
@@ -258,6 +284,21 @@ def parse_draft(text: str) -> tuple[str, str] | None:
     if not body.strip():
         return None
     return subject, body
+
+
+def parse_messenger_body(text: str) -> str | None:
+    """Extract the body of a subject-less messenger draft's ## Draft section (007).
+
+    Messenger DMs have no `**Subject:**` line (build_messenger_draft), so
+    parse_draft returns None for them. This returns the ## Draft body verbatim,
+    or None when the section is missing/empty (such notes are not deliverable —
+    FR-010)."""
+    _, sections = parse_note(text)
+    draft = dict(sections).get("Draft")
+    if draft is None:
+        return None
+    body = draft.strip("\n")
+    return body if body.strip() else None
 
 
 def set_status(path: str | Path, new_status: str, log_line: str) -> None:
