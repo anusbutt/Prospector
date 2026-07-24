@@ -7,7 +7,7 @@ from typer.testing import CliRunner
 
 from prospector import vault
 from prospector.cli import app
-from tests.unit.test_dm import write_messenger_note
+from test_dm import write_messenger_note
 
 runner = CliRunner()
 

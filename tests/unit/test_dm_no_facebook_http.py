@@ -6,7 +6,7 @@ target and (b) no httpx client is ever constructed during the walk."""
 import httpx
 
 from prospector import dm as dm_mod
-from tests.unit.test_dm import Confirm, make_settings, write_messenger_note
+from test_dm import Confirm, make_settings, write_messenger_note
 
 
 def test_run_dm_makes_no_facebook_request(tmp_path, monkeypatch):
