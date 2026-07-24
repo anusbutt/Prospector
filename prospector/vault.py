@@ -449,6 +449,11 @@ def build_research_markdown(prospect: Prospect) -> str:
         f"- Owner name: {name_line}",
         f"- Sources: {sources}",
         f"- Hook: {hook_line}",
+    ]
+    if research.email_evidence is not None:
+        ev = research.email_evidence
+        lines.append(f"- Email recovered: {ev.value} ({ev.source}: {ev.excerpt})")
+    lines += [
         f"- Failures: {failures}",
     ]
     if prospect.company.duplicate_of:

@@ -7,17 +7,21 @@ from helpers import company_notes, frontmatter, run_fixture_batch
 class TestBatchRun:
     def test_one_note_per_valid_row(self, tmp_path, stubbed_network):
         summary, vault_dir = run_fixture_batch(tmp_path)
+        # 008: "Chat Only Cleaners" has no email AND no website, so there are no
+        # pages to recover an address from. It gets no note and is reported by
+        # name instead of being bucketed to a second channel (FR-009).
         assert company_notes(vault_dir) == [
             "acme-duct-cleaning.md",
             "acme-duct-south.md",
             "beta-air-systems.md",
-            "chat-only-cleaners.md",
             "delta-fresh-air.md",
             "gamma-vent-care.md",
             "plain-ducts.md",
         ]
         assert summary.total == 7  # malformed row warned and skipped
-        assert summary.processed == 7
+        assert summary.processed == 6
+        assert summary.no_email_skipped == 1
+        assert [name for name, _ in summary.skipped_companies] == ["Chat Only Cleaners"]
         assert summary.failed == 0
         assert summary.reconciles()
         assert summary.named_high == 3  # acme + acme-south (about page), beta (scott@)

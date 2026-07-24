@@ -57,6 +57,9 @@ class ResearchResult:
     name_evidence: list[Evidence] = field(default_factory=list)
     hook: str | None = None
     hook_evidence: Evidence | None = None
+    # 008 FR-007: set when the address was recovered from the company's own
+    # pages rather than supplied in the input row.
+    email_evidence: "Evidence | None" = None
     city: str | None = None
     sources_consulted: list[str] = field(default_factory=list)
     failures: list[str] = field(default_factory=list)

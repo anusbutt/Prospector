@@ -16,9 +16,14 @@ def load_notes(vault_dir):
 
 
 class TestSuccessCriteria:
-    def test_sc002_every_valid_row_produces_a_note(self, tmp_path, stubbed_network):
+    def test_sc002_every_reachable_row_produces_a_note(self, tmp_path, stubbed_network):
+        """008: every company is either noted or named as unreachable — there is
+        no third outcome and nothing is silently bucketed (SC-003)."""
         summary, vault_dir = run_fixture_batch(tmp_path)
-        assert len(company_notes(vault_dir)) == summary.total == 7
+        assert summary.total == 7
+        assert len(company_notes(vault_dir)) == summary.processed
+        assert summary.processed + summary.failed + summary.no_email_skipped == summary.total
+        assert summary.reconciles()
 
     def test_sc003_duplicates_leave_one_to_send_per_inbox(self, tmp_path, stubbed_network):
         _, vault_dir = run_fixture_batch(tmp_path)

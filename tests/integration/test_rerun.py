@@ -52,5 +52,8 @@ class TestRerun:
     def test_second_run_reports_all_unchanged(self, tmp_path, stubbed_network):
         run_fixture_batch(tmp_path)
         summary, _ = run_fixture_batch(tmp_path)
-        details = [detail for _, _, detail in summary.per_company]
+        # 008: skipped companies report "no email found", not "unchanged" —
+        # they have no note to compare against.
+        details = [d for _, outcome, d in summary.per_company if outcome != "skipped"]
+        assert details, "expected at least one processed company"
         assert all("unchanged" in d for d in details), details

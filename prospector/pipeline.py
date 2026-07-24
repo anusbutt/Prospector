@@ -29,6 +29,14 @@ def _log(message: str) -> None:
     print(message, file=sys.stderr)
 
 
+class NoEmailFound(Exception):
+    """A company had no supplied address and none could be recovered (008 FR-009).
+
+    Distinct from a processing failure: nothing went wrong, the company simply
+    cannot be reached by email. It is skipped without a note and reported by
+    name in the run summary — never bucketed to another channel."""
+
+
 def run_batch(
     input_path: str | Path,
     settings: Settings,
@@ -78,7 +86,18 @@ def run_batch(
             )
             outcome, detail = _write(prospect, draft, vault_dir, no_llm=no_llm, frozen=frozen)
             _count_drafting_path(summary, company.slug, draft)
+            if prospect.research.email_evidence is not None:
+                summary.email_recovered += 1
             summary.processed += 1
+        except NoEmailFound as exc:
+            # FR-009: no note is written; the company is named in the summary so
+            # an unreachable prospect is visible rather than silently dropped.
+            if verbose:
+                _log(f"skipped {company.slug}: {exc}")
+            summary.no_email_skipped += 1
+            summary.skipped_companies.append((company.company, str(exc)))
+            summary.per_company.append((company.slug, "skipped", f"no email found ({exc})"))
+            continue
         except Exception as exc:  # per-company isolation (FR-021)
             _log(f"error: {company.slug}: {exc}")
             prospect = Prospect(company=company, research=ResearchResult(website=company.website))
@@ -104,6 +123,8 @@ def _process_company(
     instructions=None,
 ) -> tuple[Prospect, Draft | None]:
     research = _research(company, settings, fetcher, verbose=verbose)
+    if not company.email:
+        raise NoEmailFound(company.bucket_reason or "no email address found")
     prospect = _score(company, research, settings)
     draft: Draft | None = None
     if no_llm:
@@ -139,6 +160,14 @@ def _research(company: Company, settings: Settings, fetcher: Fetcher, *, verbose
                 html = _fetch_page(url, fetcher, research, check_robots=True)
                 if html is not None:
                     pages.append(extracting.PageContent(kind, url, html))
+
+    # 008 FR-006: no supplied address -> look for one the company publishes on
+    # the pages we already fetched. No new request is made (FR-011).
+    if not company.email and pages:
+        recovered, evidence = extracting.recover_email(pages)
+        if recovered:
+            company.email = recovered
+            research.email_evidence = evidence
 
     if pages:
         outcome = extracting.extract(company, pages)
