@@ -12,7 +12,6 @@ import respx
 
 from prospector.agent_draft import draft_email
 from prospector.config import Settings
-from prospector.draft import PRODUCT_URL, SIGNATURE
 from prospector.instructions import InstructionSet
 from prospector.models import (
     Company,
@@ -21,6 +20,18 @@ from prospector.models import (
     Prospect,
     ResearchResult,
 )
+
+# 008: the offer moved into the profile. Read the shipped values straight from
+# the reference profile so these tests assert against the copy that actually
+# ships, not a second copy that could drift. It resolves through the packaged
+# tier of the search path, so no environment setup is needed here.
+from prospector.profiles import load as _load_profile
+
+PROFILE = _load_profile("duct-cleaning")
+
+PRODUCT_URL = PROFILE.product_url
+SIGNATURE = PROFILE.signature
+
 
 OPENROUTER = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -81,7 +92,7 @@ class TestHappyPath:
     @respx.mock
     def test_valid_agent_response_is_used(self, settings, instructions):
         respx.post(OPENROUTER).mock(return_value=httpx.Response(200, json=agent_reply(VALID_BLOCKS)))
-        draft = draft_email(make_prospect(), settings, instructions)
+        draft = draft_email(make_prospect(), settings, instructions, PROFILE)
         assert draft.source == "agent"
         assert draft.validated
         assert "Twenty-two years" in draft.body
@@ -94,7 +105,7 @@ class TestNeverRaises:
     @respx.mock
     def test_transport_error(self, settings, instructions):
         respx.post(OPENROUTER).mock(side_effect=httpx.ConnectError("boom"))
-        draft = draft_email(make_prospect(), settings, instructions)
+        draft = draft_email(make_prospect(), settings, instructions, PROFILE)
         assert draft.source == "template"
         assert any("agent call failed" in e for e in draft.validation_errors)
 
@@ -102,7 +113,7 @@ class TestNeverRaises:
     def test_http_500(self, settings, instructions):
         route = respx.post(OPENROUTER)
         route.side_effect = [httpx.Response(500, text="upstream down"), httpx.Response(200, json=template_reply())]
-        draft = draft_email(make_prospect(), settings, instructions)
+        draft = draft_email(make_prospect(), settings, instructions, PROFILE)
         assert draft.source == "template"
 
     @respx.mock
@@ -112,7 +123,7 @@ class TestNeverRaises:
             httpx.Response(200, json={"choices": [{"message": {"content": "not json at all"}}]}),
             httpx.Response(200, json=template_reply()),
         ]
-        draft = draft_email(make_prospect(), settings, instructions)
+        draft = draft_email(make_prospect(), settings, instructions, PROFILE)
         assert draft.source == "template"
         assert any("malformed" in e for e in draft.validation_errors)
 
@@ -123,7 +134,7 @@ class TestNeverRaises:
             httpx.Response(200, json=agent_reply(VALID_BLOCKS * 3)),  # 12 blocks
             httpx.Response(200, json=template_reply()),
         ]
-        draft = draft_email(make_prospect(), settings, instructions)
+        draft = draft_email(make_prospect(), settings, instructions, PROFILE)
         assert draft.source == "template"
         assert any("expected 3-6" in e for e in draft.validation_errors)
 
@@ -136,7 +147,7 @@ class TestNeverRaises:
             httpx.Response(200, json=agent_reply(bad)),
             httpx.Response(200, json=template_reply()),
         ]
-        draft = draft_email(make_prospect(), settings, instructions)
+        draft = draft_email(make_prospect(), settings, instructions, PROFILE)
         assert draft.source == "template"
         assert any("unknown id 'about_page_9'" in e for e in draft.validation_errors)
 
@@ -149,7 +160,7 @@ class TestNeverRaises:
             httpx.Response(200, json=agent_reply(bad)),
             httpx.Response(200, json=template_reply()),
         ]
-        draft = draft_email(make_prospect(), settings, instructions)
+        draft = draft_email(make_prospect(), settings, instructions, PROFILE)
         assert draft.source == "template"
         assert any("ad-running claim" in e for e in draft.validation_errors)
 
@@ -163,7 +174,7 @@ class TestNeverRaises:
             httpx.Response(200, text="{}"),
         ):
             respx.post(OPENROUTER).mock(side_effect=[side_effect, httpx.Response(200, json=template_reply())])
-            draft = draft_email(make_prospect(), settings, instructions)
+            draft = draft_email(make_prospect(), settings, instructions, PROFILE)
             assert draft is not None
 
 
@@ -172,7 +183,7 @@ class TestNoRequestWhenPointless:
     def test_no_evidence_no_request(self, settings, instructions):
         """G3/FR-317: nothing to cite means the agent call is pure cost."""
         route = respx.post(OPENROUTER).mock(return_value=httpx.Response(200, json=template_reply()))
-        draft = draft_email(make_prospect(with_evidence=False), settings, instructions)
+        draft = draft_email(make_prospect(with_evidence=False), settings, instructions, PROFILE)
         assert draft.source == "template"
         assert any("no evidence to cite" in e for e in draft.validation_errors)
         # exactly one call: the template's own slot fill, never the agent's
@@ -181,7 +192,7 @@ class TestNoRequestWhenPointless:
     @respx.mock
     def test_no_instructions_no_agent_request(self, settings):
         route = respx.post(OPENROUTER).mock(return_value=httpx.Response(200, json=template_reply()))
-        draft = draft_email(make_prospect(), settings, instructions=None)
+        draft = draft_email(make_prospect(), settings, instructions=None, profile=PROFILE)
         assert draft.source == "template"
         assert route.call_count == 1
 
@@ -195,7 +206,7 @@ class TestTotalOutage:
         records that no draft was produced. Equivalence with today is the bar —
         offline drafting was never the promise."""
         respx.post(OPENROUTER).mock(side_effect=httpx.ConnectError("network unreachable"))
-        draft = draft_email(make_prospect(), settings, instructions)
+        draft = draft_email(make_prospect(), settings, instructions, PROFILE)
         assert draft.source == "template"
         assert not draft.validated
         assert any("agent call failed" in e for e in draft.validation_errors)
@@ -209,7 +220,7 @@ class TestTotalOutage:
             httpx.Response(200, json=agent_reply([{"text": "x", "cites": []}] * 4)),
             httpx.Response(200, json=template_reply()),
         ]
-        draft = draft_email(make_prospect(), settings, instructions)
+        draft = draft_email(make_prospect(), settings, instructions, PROFILE)
         assert draft.source == "template"
         assert draft.validated, "template copy itself must still be valid"
         assert "free 10-day pilot" in draft.body

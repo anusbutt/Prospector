@@ -17,7 +17,6 @@ DEFAULT_SMTP_SECURITY = "ssl"  # implicit TLS (port 465); or "starttls" (587)
 DEFAULT_SEND_CAPS = "15,30,60,100"  # weekly ramp; last value applies to week 4+
 DEFAULT_SEND_DELAY = "30,90"  # randomized seconds between real sends: min,max
 DEFAULT_LEDGER = "send_ledger.jsonl"
-DEFAULT_DM_LEDGER = "dm_ledger.jsonl"  # assisted-manual Messenger deliveries (007)
 DEFAULT_GMAIL_CLIENT = "secrets/gmail_client_secret.json"
 DEFAULT_GMAIL_TOKEN = "secrets/gmail_token.json"
 
@@ -36,6 +35,7 @@ class Settings:
     places_key: str | None
     hunter_key: str | None
     vault_dir: Path
+    profile: str | None = None  # 008: selected offer profile
     send_from: str | None = None  # required for `send`; no hardcoded account
     send_provider: str = DEFAULT_SEND_PROVIDER
     send_name: str | None = None  # From display name, e.g. "Anas from Omniveer"
@@ -48,7 +48,6 @@ class Settings:
     send_caps: list[int] = field(default_factory=lambda: [15, 30, 60, 100])
     send_delay: tuple[int, int] = (30, 90)
     ledger_path: Path = field(default_factory=lambda: Path(DEFAULT_LEDGER))
-    dm_ledger_path: Path = field(default_factory=lambda: Path(DEFAULT_DM_LEDGER))
     gmail_client_secret_path: Path = field(
         default_factory=lambda: Path(DEFAULT_GMAIL_CLIENT)
     )
@@ -61,16 +60,19 @@ class Settings:
                 "or run with --no-llm to skip drafting."
             )
 
-    def require_instructions(self):
-        """Pre-flight the drafting instruction files (006, FR-323/FR-325).
+    def require_profile(self, name: str | None = None):
+        """Pre-flight the selected profile (008, FR-018/FR-019).
 
-        Loads once per run and returns the InstructionSet, so `run` fails
-        before touching the network or writing a note when a file is missing
-        or the assembled context is oversized. Imported lazily: `--help` and
-        `--no-llm` should not pay for it."""
-        from prospector.instructions import load_instructions
+        Loads and validates once per run — offer content, locked fallback and
+        per-vertical constants — so a malformed profile fails before any company
+        is processed and before anything is written. Imported lazily: `--help`
+        should not pay for it."""
+        from prospector.profiles import load
 
-        return load_instructions()
+        chosen = name or self.profile
+        if not chosen:
+            raise ConfigError("no profile selected")
+        return load(chosen)
 
     def require_places(self) -> None:
         if not self.places_key:
@@ -182,6 +184,7 @@ def load_settings(env_file: str | Path = ".env") -> Settings:
         places_key=os.environ.get("GOOGLE_PLACES_API_KEY") or None,
         hunter_key=os.environ.get("HUNTER_API_KEY") or None,
         vault_dir=Path(os.environ.get("PROSPECTOR_VAULT") or DEFAULT_VAULT),
+        profile=os.environ.get("PROSPECTOR_PROFILE") or None,
         send_from=os.environ.get("PROSPECTOR_SEND_FROM") or None,
         send_provider=(os.environ.get("PROSPECTOR_SEND_PROVIDER") or DEFAULT_SEND_PROVIDER)
         .strip()
@@ -198,7 +201,6 @@ def load_settings(env_file: str | Path = ".env") -> Settings:
         send_caps=_parse_caps(os.environ.get("PROSPECTOR_SEND_CAPS") or DEFAULT_SEND_CAPS),
         send_delay=_parse_delay(os.environ.get("PROSPECTOR_SEND_DELAY") or DEFAULT_SEND_DELAY),
         ledger_path=Path(os.environ.get("PROSPECTOR_LEDGER") or DEFAULT_LEDGER),
-        dm_ledger_path=Path(os.environ.get("PROSPECTOR_DM_LEDGER") or DEFAULT_DM_LEDGER),
         gmail_client_secret_path=Path(
             os.environ.get("PROSPECTOR_GMAIL_CLIENT") or DEFAULT_GMAIL_CLIENT
         ),

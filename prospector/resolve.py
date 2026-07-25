@@ -14,7 +14,7 @@ from selectolax.parser import HTMLParser
 
 from prospector.config import Settings
 from prospector.fetch import FetchError, Fetcher, is_blocked_host
-from prospector.models import Company, Evidence, EvidenceKind
+from prospector.models import Company
 
 PLACES_URL = "https://places.googleapis.com/v1/places:searchText"
 DDG_URL = "https://html.duckduckgo.com/html/"
@@ -124,59 +124,6 @@ def _ddg_result_urls(html: str) -> list[str]:
         elif href.startswith("http"):
             urls.append(href)
     return urls
-
-
-# Cues in a search snippet suggesting an actively used FB page (§7.5).
-FB_ACTIVITY_CUES = (
-    "review", "rating", "followers", "likes", "posted", "hours ago",
-    "days ago", "open now", "updated",
-)
-
-
-def fb_search_evidence(company: Company, fetcher: Fetcher, info: ResolveInfo) -> Evidence | None:
-    """DDG search for the company's Facebook presence. Only search-result
-    snippets are read — the Facebook page itself is never fetched
-    (Constitution II). Returns Evidence only for an active-looking page;
-    anything less defaults down to nothing (§7.5)."""
-    query = f'"{company.company}" facebook'
-    url = f"{DDG_URL}?q={quote_plus(query)}"
-    info.sources_consulted.append(f"ddg-search: {query}")
-    try:
-        response = fetcher.fetch(url)
-    except FetchError as exc:
-        info.failures.append(f"ddg fb search failed: {exc}")
-        return None
-    for result_url, snippet in _ddg_results_with_snippets(response.text):
-        host = (urlparse(result_url).hostname or "").lower()
-        if not (host == "facebook.com" or host.endswith(".facebook.com")):
-            continue
-        haystack = snippet.lower()
-        if any(cue in haystack for cue in FB_ACTIVITY_CUES):
-            return Evidence(
-                kind=EvidenceKind.FB_SEARCH_ACTIVE, value=result_url,
-                source=f"ddg-search: {query}", excerpt=snippet[:200],
-            )
-        return None  # FB page found but no activity cues: default down
-    return None
-
-
-def _ddg_results_with_snippets(html: str) -> list[tuple[str, str]]:
-    tree = HTMLParser(html)
-    titles = tree.css("a.result__a")
-    snippets = tree.css("a.result__snippet, div.result__snippet")
-    results: list[tuple[str, str]] = []
-    for i, node in enumerate(titles):
-        href = node.attributes.get("href") or ""
-        if href.startswith("//"):
-            href = "https:" + href
-        parsed = urlparse(href)
-        if parsed.hostname and parsed.hostname.endswith("duckduckgo.com"):
-            href = parse_qs(parsed.query).get("uddg", [""])[0]
-        snippet = snippets[i].text(separator=" ").strip() if i < len(snippets) else ""
-        title = node.text(separator=" ").strip()
-        if href:
-            results.append((href, f"{title} {snippet}".strip()))
-    return results
 
 
 def _is_non_company(url: str) -> bool:

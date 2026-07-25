@@ -9,8 +9,10 @@ The system is designed around human approval and verifiable claims. It never
 contacts Facebook, never invents a prospect's name, and never sends a message
 unless a user explicitly approves the corresponding note.
 
-> Prospector was initially built for duct-cleaning outreach, but the pipeline
-> can be adapted to other local-service verticals.
+The offer itself is not built in. Each vertical is a **profile** — a directory of
+content selected with `--profile` — so serving a new niche means adding files,
+not changing code. A `duct-cleaning` profile ships with the package as a working
+reference.
 
 ![Prospector architecture](docs/architecture.png)
 
@@ -22,6 +24,7 @@ unless a user explicitly approves the corresponding note.
 - [Installation](#installation)
 - [Running the CLI](#running-the-cli)
 - [Configuration](#configuration)
+- [Profiles](#profiles)
 - [Usage](#usage)
 - [Input format](#input-format)
 - [Review workflow](#review-workflow)
@@ -33,19 +36,20 @@ unless a user explicitly approves the corresponding note.
 ## Capabilities
 
 - Ingest CSV files and Markdown tables.
-- Deduplicate shared inboxes and classify email and Messenger prospects.
+- Deduplicate shared inboxes.
+- Recover a published address from a company's own pages when the input row has
+  none, and report by name any company that remains unreachable.
 - Resolve missing websites through Google Places or DuckDuckGo.
 - Research public company pages with bounded retries, host pacing, and
   `robots.txt` support.
-- Extract names, locations, hooks, and open-web Facebook signals with evidence.
+- Extract names, locations, and hooks with evidence.
 - Score evidence deterministically before it reaches the drafting model.
 - Produce cited drafts with a locked-template fallback.
+- Serve any vertical from a selectable profile, with no code change.
 - Write one Markdown note per company and a Dataview-compatible dashboard.
 - Preserve human-owned content across repeated runs.
 - Deliver approved drafts through Gmail or authenticated SMTP with dry-run
   defaults, daily caps, pacing, and duplicate-send protection.
-- Assist manual Messenger delivery: copy an approved draft to the clipboard and
-  open the prospect's Facebook page in your own browser — you send it yourself.
 
 ## Safety guarantees
 
@@ -56,10 +60,13 @@ requirements: a change that breaks one must be rejected. See
 | Guarantee | Enforcement |
 | --- | --- |
 | Human approval is required | `prospector send` considers only notes with `status: approved`. It previews by default; real delivery requires `--send` and confirmation unless `--yes` is supplied. |
-| Facebook is never contacted | All outbound HTTP traffic passes through a guard that rejects Facebook and Messenger hosts before network activity. Facebook URLs are stored only as input/target signals. Assisted Messenger delivery (`prospector dm`) never sends a message or automates a browser — it hands the URL to your own browser, and you send it yourself. |
+| Email is the only channel | There is no Messenger or Facebook delivery path in the tool, and no command that opens one. |
+| Facebook is never contacted | All outbound HTTP traffic passes through a guard that rejects Facebook and Messenger hosts before network activity. Meta Pixel markup on a company's *own* site is read as a sourcing signal; the URLs inside it are never requested. |
 | Names are never fabricated | Deterministic code extracts and scores names. Only high-confidence, source-backed names are used; the model does not choose the greeting. |
+| No company is silently dropped | A row with no address gets an email-recovery attempt over pages already fetched; if that fails the company is named in the run summary. There is no third outcome. |
 | Prospect claims require evidence | Every agent-written prose block cites captured research records. A deterministic validator rejects missing or invalid citations. |
-| Unsupported claims are rejected | Invalid or unverifiable copy is rejected and replaced with a locked template. |
+| Unsupported claims are rejected | Invalid or unverifiable copy is rejected and replaced with the profile's locked template. |
+| A broken profile stops the run | Profiles are validated in full before any company is processed; a malformed one exits 1 having fetched and written nothing. |
 | Sending is identity-bound | The authenticated identity must match the dedicated mailbox configured in `PROSPECTOR_SEND_FROM`. |
 | The vault is the interface | Research, drafts, approvals, and review queues remain in plain Markdown; there is no web application. |
 
@@ -94,20 +101,23 @@ sections.
 
 ### Pipeline details
 
-1. **Ingest and deduplicate** - Parse input, normalize rows, and group genuinely
+1. **Select and validate the profile** - Resolve `--profile`, then validate it in
+   full before any company is touched.
+2. **Ingest and deduplicate** - Parse input, normalize rows, and group genuinely
    shared inboxes.
-2. **Classify channels** - Route valid emails to email. Blank values,
-   `messenger`, and Facebook URLs enter the Messenger draft queue.
 3. **Resolve websites** - Use Google Places when configured, with a DuckDuckGo
    fallback during `run`.
 4. **Fetch pages** - Read the homepage and relevant About, Team, and Contact
    pages.
-5. **Extract evidence** - Identify name candidates, locations, hooks, and
-   Facebook usage signals with source excerpts.
-6. **Score evidence** - Apply deterministic confidence and channel-fit rules.
-7. **Draft and validate** - Send only structured evidence to OpenRouter, then
+5. **Recover missing addresses** - For a row with no email, look for a published
+   address in the pages already fetched. No new requests are made. A company with
+   no usable address is skipped and named in the summary.
+6. **Extract evidence** - Identify name candidates, locations, and hooks with
+   source excerpts.
+7. **Score evidence** - Apply deterministic confidence rules.
+8. **Draft and validate** - Send only structured evidence to OpenRouter, then
    validate every returned citation and claim.
-8. **Write the vault** - Create or update company notes and `_Dashboard.md`
+9. **Write the vault** - Create or update company notes and `_Dashboard.md`
    without overwriting human-owned content.
 
 ## Installation
@@ -171,6 +181,8 @@ Secrets are loaded from the gitignored `.env` file.
 | --- | --- | --- |
 | `OPENROUTER_API_KEY` | For drafting | OpenRouter credential. Omit only with `--no-llm`. |
 | `OPENROUTER_MODEL` | No | Defaults to `anthropic/claude-sonnet-4.5`. |
+| `PROSPECTOR_PROFILE` | No | Default profile name, so `--profile` can be omitted. |
+| `PROSPECTOR_PROFILES` | No | Extra profile directory, searched before `./profiles/`. |
 | `GOOGLE_PLACES_API_KEY` | For `source` | Required for discovery. During `run`, its absence enables the DuckDuckGo fallback. |
 | `HUNTER_API_KEY` | No | Enables email-name enrichment at medium confidence. |
 | `PROSPECTOR_SEND_PROVIDER` | No | `gmail` (default) or `smtp`. |
@@ -189,19 +201,95 @@ Secrets are loaded from the gitignored `.env` file.
 Gmail OAuth files live under `secrets/`; the send ledger remains local. Both
 locations are excluded from version control.
 
+## Profiles
+
+A profile holds everything specific to one vertical and one offer. Nothing about
+a particular offer is compiled into the code.
+
+```text
+profiles/<name>/
+├── IDENTITY.md              who the sender is
+├── OFFER.md                 what is being offered
+├── CONSTRAINTS.md           hard rules for the drafting model
+├── skills/
+│   └── write-cold-email.md  writing guidance
+├── fallback.md              the locked template: ## Subject, ## Template, ## Invariants
+└── profile.toml             tags, signature, product_url, keywords, banned_claims
+```
+
+Select one per run:
+
+```bash
+prospector run companies.csv --profile duct-cleaning
+prospector run companies.csv                          # lists profiles and asks
+```
+
+Omitting `--profile` prompts interactively. A non-interactive run (CI, a pipe,
+cron) fails with the available names rather than blocking on a prompt nobody can
+answer. Set `PROSPECTOR_PROFILE` to skip the question entirely.
+
+### Adding a vertical
+
+No code changes are required. Copy the bundled reference into your own
+`./profiles/` directory and edit it:
+
+```bash
+mkdir -p profiles
+cp -r "$(python -c 'import prospector,pathlib;print(pathlib.Path(prospector.__file__).parent/"profiles"/"duct-cleaning")')" profiles/hvac
+```
+
+Edit the files in `profiles/hvac/`, then run it:
+
+```bash
+prospector run leads.csv --profile hvac
+```
+
+`source` picks up the profile's first keyword as its default search term, notes
+are tagged from `tags`, and the drafted copy carries that profile's signature and
+its single promotional link.
+
+Profiles resolve from `$PROSPECTOR_PROFILES`, then `./profiles/`, then the
+profiles bundled with the package — so your own directory always wins. A profile
+you place in `./profiles/duct-cleaning/` shadows the bundled one; the bundled
+copy is never modified, so it stays a clean reference.
+
+Every profile is validated in full before any company is processed. A missing
+file, a `fallback.md` without its three sections, a missing `profile.toml` key, or
+an oversized instruction assembly exits 1 naming the profile and the problem,
+having fetched and written nothing. Validation never falls back to another
+profile.
+
+Profiles are content, not a way around the guarantees: they cannot grant the
+model tools, network, or filesystem access, and cannot disable citation
+validation, the locked fallback, approval-gated sending, or the Facebook host
+guard. They must never contain secrets.
+
 ## Usage
 
 ### Process a company list
 
 ```bash
-prospector run companies.csv
-prospector run companies.csv --vault ~/Obsidian/Outreach
-prospector run companies.csv --limit 3
-prospector run companies.csv --only summit-duct-care
-prospector run companies.csv --no-llm
+prospector run companies.csv --profile duct-cleaning
+prospector run companies.csv --profile duct-cleaning --vault ~/Obsidian/Outreach
+prospector run companies.csv --profile duct-cleaning --limit 3
+prospector run companies.csv --profile duct-cleaning --only summit-duct-care
+prospector run companies.csv --profile duct-cleaning --no-llm
 ```
 
 The default output directory is `Vault/Outreach`.
+
+The run summary reports how many addresses were recovered and names every
+company left without one:
+
+```text
+Prospector run: 40 companies
+  processed: 33   failed: 0
+  email recovered: 6   no email found: 7
+
+  no email found:
+    summit-duct-care     no published address on any fetched page
+    peak-vent-cleaning   no website could be resolved
+```
 
 ### Refresh the dashboard
 
@@ -213,11 +301,13 @@ prospector dashboard --vault ~/Obsidian/Outreach
 ### Discover companies
 
 ```bash
-prospector source
-prospector source --limit 2 --all --verbose
+prospector source --profile duct-cleaning
+prospector source --profile duct-cleaning --limit 2 --all --verbose
 prospector source --keyword 'air duct cleaning' --metros my_metros.txt
 prospector source --out candidates.csv --max-queries 30
 ```
+
+Without `--keyword`, the profile's first keyword is used.
 
 `source` uses Google Places Text Search, deduplicates results, fetches each
 candidate's own website, and checks retrieved markup for Meta Pixel signals
@@ -237,24 +327,6 @@ prospector send --send --yes
 
 `prospector send` is a dry-run unless `--send` is present.
 
-### Deliver approved Messenger drafts (assisted-manual)
-
-```bash
-prospector dm
-prospector dm --send
-prospector dm --send --limit 5
-prospector dm --send --yes
-```
-
-`prospector dm` walks approved `channel: messenger` notes one at a time. With
-`--send`, for each note it copies the draft to your clipboard and opens the
-company's Facebook page in your own browser; you paste, send it yourself, then
-confirm. Confirmed deliveries are recorded in `dm_ledger.jsonl` (so a prospect is
-never queued twice) and the note flips to `sent`. Without `--send` it only
-previews. The tool never sends a Messenger message, never automates a browser,
-and never contacts Facebook — only your browser does. Notes with no Facebook link
-on file are still shown so you can locate the company manually.
-
 ### Exit codes
 
 | Command | Code | Meaning |
@@ -269,16 +341,21 @@ on file are still shown so you can locate the company manually.
 
 ## Input format
 
-Input may be CSV or a Markdown table. `company` and `email` are required;
-`website`, `facebook_url`, `city`, `owner_name`, and `notes` are
-optional. Headers are case-insensitive. Unknown columns produce a warning, and
-malformed rows are reported without aborting the batch.
+Input may be CSV or a Markdown table. `company` is required; `email`, `website`,
+`city`, `owner_name`, and `notes` are optional. Headers are case-insensitive.
+Unknown columns produce a warning, and malformed rows are reported without
+aborting the batch.
+
+A row with no usable address is not dropped: if a website can be resolved, the
+tool looks for a published address on the pages it already fetched. Anything in
+the `email` column that is not a valid address — a blank, the word `messenger`, a
+Facebook URL — is treated as "no address supplied" and takes that same path.
 
 ```csv
 company,email,website,city,owner_name,notes
 Summit Duct Care,info@summitduct.example.com,summitduct.example.com,Denver,,
-Peak Vent Cleaning,messenger,,Boulder,,prefers DMs
-Alpine Air Ducts,https://facebook.com/alpineairducts,,Fort Collins,,
+Peak Vent Cleaning,,peakvent.example.com,Boulder,,address recovered from site
+Alpine Air Ducts,,,Fort Collins,,no site; will be reported as skipped
 Mile High Ducts,scott@milehighducts.example.com,milehighducts.example.com,,Scott Bell,referral
 Mile High Dryer Vents,scott@milehighducts.example.com,milehighducts.example.com,Denver,,same owner
 ```
@@ -294,14 +371,9 @@ Mile High Dryer Vents,scott@milehighducts.example.com,milehighducts.example.com,
 Site-extracted candidates must also match the bundled US first-name list.
 Conservative rejection is preferred over an incorrect greeting.
 
-| Facebook signal | Rule | Draft behavior |
-| --- | --- | --- |
-| `strong` | At least two signals, including an active-use indicator | Facebook-specific variant. |
-| `weak` | One signal, or presence without activity | Channel-neutral copy with one conditional mention. |
-| `none` | No observed signal | Channel-neutral copy without a Facebook mention. |
-
-Signals come from the open web; the Facebook page itself is never requested.
-Uncertain evidence always scores down rather than up.
+The drafted copy makes no claim about a prospect's own marketing channels, so
+uncertain evidence about them cannot leak into a message. Uncertain evidence
+always scores down rather than up.
 
 ## Review workflow
 
@@ -313,8 +385,6 @@ Uncertain evidence always scores down rather than up.
 5. Change `status: to-send` to `status: approved` when the message is ready.
 6. Run `prospector send` to preview the batch.
 7. Run `prospector send --send` to deliver it.
-8. For `channel: messenger` notes, run `prospector dm --send` to be walked
-   through assisted-manual delivery (clipboard + your browser; you send).
 
 Prospector preserves user-edited statuses, `## Log` entries, and custom sections
 across research runs. During real delivery, the only automatic user-visible
@@ -377,7 +447,6 @@ name_candidate:
 hook: Denver service area
 website: summitduct.example.com
 angle: offer-led
-fb_signal: none
 duplicate_of:
 needs_review: false
 draft_source: agent
@@ -415,6 +484,9 @@ prospect-specific claims. `draft_source` identifies the drafting path, and
   model controls phrasing, not factual acceptance.
 - **Evidence-limited drafting.** The model receives structured evidence rather
   than raw HTML; invalid output is discarded.
+- **Offer as content.** The vertical, the offer, and the locked copy are files in
+  a profile, reviewed as prose. A profile changes what is said, never what the
+  tool is permitted to do.
 - **Human-owned state.** Approval, outcomes, logs, and custom content stay in
   readable Markdown and survive repeated runs.
 - **Safe degradation.** Optional-service failures use documented fallbacks or
@@ -427,8 +499,8 @@ prospect-specific claims. `draft_source` identifies the drafting path, and
 - Name extraction depends on what public websites disclose; lower-confidence
   candidates are flagged rather than guessed.
 - Heuristics are optimized for English-language US local-service businesses.
-- Drafting instructions in `prospector/agent/` and the fallback template are
-  currently tailored to the duct-cleaning offer.
+- Email recovery only reads pages the run already fetched, so a company with no
+  resolvable website cannot be reached and is reported instead.
 - Meta Pixel markup does not prove current advertising activity and is never
   presented as such.
 - Deliverability depends on mailbox reputation, authentication, domain policy,

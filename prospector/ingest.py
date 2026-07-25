@@ -1,7 +1,10 @@
 """Input parsing: CSV or markdown table -> normalized Company rows + warnings.
 
-Bucketing (contracts/cli.md): valid email -> email channel; blank / "messenger" /
-Facebook URL -> messenger; anything else -> messenger + needs_review.
+Address classification (008 contracts/cli.md): a valid email is used as-is.
+Blank / "messenger" / a Facebook URL / anything unparseable all mean NO ADDRESS
+SUPPLIED — the company goes to email recovery in the pipeline and, if no address
+is found there, is skipped and reported. Nothing is bucketed to another channel
+(Constitution v7.0.0, Principle I).
 """
 
 import csv
@@ -10,7 +13,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-from prospector.models import Channel, Company
+from prospector.models import Company
 
 KNOWN_COLUMNS = ("company", "email", "website", "facebook_url", "city", "owner_name", "notes")
 REQUIRED_COLUMNS = ("company", "email")
@@ -76,9 +79,12 @@ def _build_companies(header: list[str], rows: list[list[str]]) -> tuple[list[Com
             warnings.append(f"row {row_num}: missing company name, skipped")
             continue
         raw_email = values.get("email", "")
-        email, channel, reason, needs_review = _bucket_email(raw_email)
+        email, reason, needs_review = _classify_email(raw_email)
         if needs_review:
-            warnings.append(f"row {row_num}: unrecognized email field {raw_email!r}, routed to messenger and flagged")
+            warnings.append(
+                f"row {row_num}: unrecognized email field {raw_email!r}, "
+                "treated as no address supplied and flagged for review"
+            )
         companies.append(
             Company(
                 company=company_name,
@@ -90,7 +96,6 @@ def _build_companies(header: list[str], rows: list[list[str]]) -> tuple[list[Com
                 owner_name=values.get("owner_name") or None,
                 notes=values.get("notes") or None,
                 row_num=row_num,
-                channel=channel,
                 bucket_reason=reason,
                 needs_review=needs_review,
             )
@@ -98,18 +103,19 @@ def _build_companies(header: list[str], rows: list[list[str]]) -> tuple[list[Com
     return companies, warnings
 
 
-def _bucket_email(raw: str) -> tuple[str | None, Channel, str | None, bool]:
-    """Returns (email, channel, bucket_reason, needs_review)."""
+def _classify_email(raw: str) -> tuple[str | None, str | None, bool]:
+    """Returns (email, reason, needs_review). A None email means no address was
+    supplied; the pipeline attempts recovery before giving up (008 FR-003)."""
     value = raw.strip()
     if not value:
-        return None, Channel.MESSENGER, "blank email", False
+        return None, "blank email", False
     if value.lower() == "messenger":
-        return None, Channel.MESSENGER, "marked messenger", False
+        return None, "no email supplied (marked messenger)", False
     if FB_URL_RE.search(value):
-        return None, Channel.MESSENGER, "facebook url in email field", False
+        return None, "no email supplied (facebook url in email field)", False
     if EMAIL_RE.fullmatch(value):
-        return value.lower(), Channel.EMAIL, None, False
-    return None, Channel.MESSENGER, f"unrecognized email field: {value!r}", True
+        return value.lower(), None, False
+    return None, f"unrecognized email field: {value!r}", True
 
 
 @lru_cache(maxsize=1)

@@ -11,48 +11,19 @@ Precedence (strongest first):
 
 high  -> greet by first name.  medium -> "team" + name_candidate +
 needs_review.  none -> "team".  Never fabricate (Constitution IV).
-
-fb_signal classification (§7.5) arrives in US3 (T018).
 """
 
 from prospector.enrich import NameInference
 from prospector.models import (
-    Channel,
     Company,
     Confidence,
     Evidence,
     EvidenceKind,
-    FbSignal,
     Prospect,
     ResearchResult,
-    Variant,
 )
 
 HIGH_SITE_KINDS = (EvidenceKind.OWNER_TEXT, EvidenceKind.ABOUT_PAGE, EvidenceKind.TEAM_PAGE)
-
-# §7.5: signals that show the page is actually *used*, not merely linked
-FB_ACTIVE_KINDS = (EvidenceKind.FB_WIDGET, EvidenceKind.FB_EMBED, EvidenceKind.FB_SEARCH_ACTIVE)
-
-
-def classify_fb_signal(fb_evidence: list[Evidence]) -> FbSignal:
-    """§7.5, defaulting down: strong needs two or more signals of which at
-    least one is an active-usage cue; any lesser observation is weak; nothing
-    observed is none. Never up-ranks on uncertainty (Constitution V)."""
-    if len(fb_evidence) >= 2 and any(e.kind in FB_ACTIVE_KINDS for e in fb_evidence):
-        return FbSignal.STRONG
-    if fb_evidence:
-        return FbSignal.WEAK
-    return FbSignal.NONE
-
-
-def select_variant(channel: Channel, fb_signal: FbSignal) -> Variant:
-    """Mechanical template selection (FR-014) — never a judgment call."""
-    if channel is Channel.MESSENGER:
-        return Variant.MESSENGER_DM
-    if fb_signal is FbSignal.STRONG:
-        return Variant.EMAIL_FB
-    return Variant.EMAIL_AGNOSTIC
-
 
 def first_name_of(full_name: str) -> str:
     return full_name.strip().split()[0].capitalize()

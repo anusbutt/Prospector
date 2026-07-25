@@ -5,27 +5,10 @@ from enum import Enum
 from pathlib import Path
 
 
-class Channel(str, Enum):
-    EMAIL = "email"
-    MESSENGER = "messenger"
-
-
 class Confidence(str, Enum):
     HIGH = "high"
     MEDIUM = "medium"
     NONE = "none"
-
-
-class FbSignal(str, Enum):
-    STRONG = "strong"
-    WEAK = "weak"
-    NONE = "none"
-
-
-class Variant(str, Enum):
-    EMAIL_FB = "email_fb"
-    EMAIL_AGNOSTIC = "email_agnostic"
-    MESSENGER_DM = "messenger_dm"
 
 
 class EvidenceKind(str, Enum):
@@ -36,11 +19,7 @@ class EvidenceKind(str, Enum):
     EMAIL_PATTERN = "email_pattern"
     INPUT = "input"
     HUNTER = "hunter"
-    FB_LINK = "fb_link"
-    FB_EMBED = "fb_embed"
-    FB_WIDGET = "fb_widget"
-    FB_SEARCH_ACTIVE = "fb_search_active"
-    FB_URL_INPUT = "fb_url_input"
+    EMAIL_PUBLISHED = "email_published"  # 008: address found on the company's own page
     CITY_SOURCE = "city_source"
     HOOK_SOURCE = "hook_source"
 
@@ -56,7 +35,7 @@ class Company:
     owner_name: str | None = None
     notes: str | None = None
     row_num: int = 0
-    channel: Channel = Channel.EMAIL
+    channel: str = "email"  # 008: email is the only channel
     bucket_reason: str | None = None
     duplicate_of: str | None = None
     slug: str = ""
@@ -76,9 +55,11 @@ class ResearchResult:
     website: str | None = None
     gbp_city: str | None = None
     name_evidence: list[Evidence] = field(default_factory=list)
-    fb_evidence: list[Evidence] = field(default_factory=list)
     hook: str | None = None
     hook_evidence: Evidence | None = None
+    # 008 FR-007: set when the address was recovered from the company's own
+    # pages rather than supplied in the input row.
+    email_evidence: "Evidence | None" = None
     city: str | None = None
     sources_consulted: list[str] = field(default_factory=list)
     failures: list[str] = field(default_factory=list)
@@ -91,8 +72,6 @@ class Prospect:
     name_confidence: Confidence = Confidence.NONE
     name_used: str = "team"
     name_candidate: str | None = None
-    fb_signal: FbSignal = FbSignal.NONE
-    variant: Variant = Variant.EMAIL_AGNOSTIC
     angle: str = "offer-led"
     needs_review: bool = False
 
@@ -181,7 +160,7 @@ class SendCandidate:
 
     def sendable_error(self) -> str | None:
         """Return a reason string if this candidate is NOT sendable, else None."""
-        if self.channel != Channel.EMAIL.value:
+        if self.channel != "email":
             return "not an email-channel note"
         if not self.recipient or "@" not in self.recipient or "." not in self.recipient.split("@")[-1]:
             return "missing or invalid email address"
@@ -245,79 +224,6 @@ class RunReport:
         )
 
 
-class DmOutcome(str, Enum):
-    """Per-note result of the assisted-manual Messenger walk (007 data-model.md)."""
-
-    DELIVERED = "delivered"  # human confirmed a manual send; ledgered + status flipped
-    SKIPPED_NOT_SENDABLE = "skipped_not_sendable"  # approved messenger note with no body
-    SKIPPED_ALREADY_SENT = "skipped_already_sent"  # in DM ledger, or dup target in-run
-    DECLINED = "declined"  # operator chose not to confirm; note stays approved
-    WOULD_DELIVER = "would_deliver"  # preview/dry-run: eligible, nothing done
-
-
-@dataclass
-class DmCandidate:
-    """A deliverable view of one approved messenger-channel note (007 data-model.md).
-
-    Distinct from SendCandidate: there is no email/subject, and a missing
-    facebook_url is NOT an error — it is delivered with a 'no link' notice (FR-019)."""
-
-    slug: str
-    company: str
-    facebook_url: str | None
-    body: str | None
-    note_path: "Path"
-    approved_at: float = 0.0  # note mtime; oldest-approved-first ordering
-
-    def sendable_error(self) -> str | None:
-        """Reason this note is NOT deliverable, else None. Channel is filtered
-        during collection; here only the body must be present (FR-010)."""
-        if not self.body or not self.body.strip():
-            return "draft has no body"
-        return None
-
-
-@dataclass
-class DmResult:
-    slug: str
-    facebook_url: str | None
-    outcome: DmOutcome
-    detail: str = ""
-
-
-@dataclass
-class DmRunReport:
-    dry_run: bool = True
-    results: list["DmResult"] = field(default_factory=list)
-
-    def count(self, outcome: DmOutcome) -> int:
-        return sum(1 for r in self.results if r.outcome == outcome)
-
-    @property
-    def delivered(self) -> int:
-        return self.count(DmOutcome.DELIVERED)
-
-    @property
-    def would_deliver(self) -> int:
-        return self.count(DmOutcome.WOULD_DELIVER)
-
-    @property
-    def declined(self) -> int:
-        return self.count(DmOutcome.DECLINED)
-
-    @property
-    def skipped_not_sendable(self) -> int:
-        return self.count(DmOutcome.SKIPPED_NOT_SENDABLE)
-
-    @property
-    def skipped_already(self) -> int:
-        return self.count(DmOutcome.SKIPPED_ALREADY_SENT)
-
-    @property
-    def skipped(self) -> int:
-        return self.skipped_not_sendable + self.skipped_already
-
-
 @dataclass
 class RunSummary:
     total: int = 0
@@ -326,15 +232,21 @@ class RunSummary:
     named_high: int = 0
     named_medium: int = 0
     named_none: int = 0
-    messenger: int = 0
     duplicates: int = 0
     needs_review: int = 0
     per_company: list[tuple[str, str, str]] = field(default_factory=list)  # (slug, outcome, detail)
+    # 008 email recovery (FR-010): companies with no supplied address either gain
+    # one from their own pages or are skipped and named — there is no bucket.
+    email_recovered: int = 0
+    no_email_skipped: int = 0
+    skipped_companies: list[tuple[str, str]] = field(default_factory=list)  # (company, reason)
     # 006 drafting-path visibility (FR-320). These need NOT sum to `processed`:
-    # messenger notes, --no-llm runs, and frozen notes are drafted by neither path.
+    # --no-llm runs and frozen notes are drafted by neither path.
     drafted_agent: int = 0
     drafted_template: int = 0
     fallback_reasons: list[tuple[str, str]] = field(default_factory=list)  # (slug, reason)
 
     def reconciles(self) -> bool:
-        return self.total == self.processed + self.failed
+        # 008: skipped-for-no-email is a third terminal outcome alongside
+        # processed and failed.
+        return self.total == self.processed + self.failed + self.no_email_skipped

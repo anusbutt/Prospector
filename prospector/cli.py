@@ -30,9 +30,42 @@ def main():
     """Prospector: research companies on the open web, draft outreach into an Obsidian vault."""
 
 
+def _resolve_profile(settings, requested: str | None):
+    """Select and validate the offer profile before any work happens (008).
+
+    An explicit name wins; otherwise the operator is asked. A non-interactive
+    run (CI, a pipe, cron) must FAIL rather than block on a prompt nobody can
+    answer, so the available names are printed and the run stops."""
+    import sys
+
+    from prospector.profiles import discover
+
+    name = requested or settings.profile
+    if not name:
+        available = discover()
+        if not available:
+            raise ConfigError(
+                "no profiles found. Create profiles/<name>/ with OFFER.md, "
+                "IDENTITY.md, CONSTRAINTS.md, skills/write-cold-email.md, "
+                "fallback.md and profile.toml."
+            )
+        if not sys.stdin.isatty():
+            raise ConfigError(
+                f"no profile selected. Pass --profile <name> "
+                f"(available: {', '.join(available)})."
+            )
+        typer.echo("Available profiles:")
+        for i, candidate in enumerate(available, start=1):
+            typer.echo(f"  {i}) {candidate}")
+        choice = typer.prompt("Which profile?", default="1")
+        name = available[int(choice) - 1] if choice.isdigit() else choice
+    return settings.require_profile(name)
+
+
 @app.command()
 def run(
     input: Path = typer.Argument(..., help="CSV or markdown-table file of companies"),
+    profile: str = typer.Option(None, "--profile", help="Offer profile to use (prompts when omitted)"),
     vault: Path = typer.Option(None, "--vault", help="Vault output folder (default: Vault/Outreach)"),
     limit: int = typer.Option(None, "--limit", help="Process only the first N companies"),
     only: str = typer.Option(None, "--only", help="Re-run a single company by slug"),
@@ -45,11 +78,11 @@ def run(
     settings = load_settings()
     instructions = None
     try:
+        # FR-018: the profile is validated first — a broken one costs nothing.
+        selected = _resolve_profile(settings, profile)
         if not no_llm:
             settings.require_llm()
-            # FR-323: a missing or oversized instruction file stops the run
-            # before any company is processed and before anything is written.
-            instructions = settings.require_instructions()
+            instructions = selected.instructions
         if not input.is_file():
             raise IngestError(f"input file not found: {input}")
         summary = run_batch(
@@ -61,6 +94,7 @@ def run(
             no_llm=no_llm,
             verbose=verbose,
             instructions=instructions,
+            profile=selected,
         )
     except (ConfigError, IngestError) as exc:
         typer.echo(f"error: {exc}", err=True)
@@ -73,7 +107,8 @@ def run(
 
 @app.command()
 def source(
-    keyword: str = typer.Option("duct cleaning", "--keyword", help="Service keyword for the Places text query"),
+    profile: str = typer.Option(None, "--profile", help="Offer profile to use (prompts when omitted)"),
+    keyword: str = typer.Option(None, "--keyword", help="Service keyword (default: the profile's first keyword)"),
     metros: Path = typer.Option(None, "--metros", help="Metro list file (City, ST per line; default: bundled 30-metro list)"),
     out: Path = typer.Option(Path("candidates.csv"), "--out", help="Output CSV path"),
     keep_all: bool = typer.Option(False, "--all", help="Keep every discovered candidate (default: only ad_signal: pixel)"),
@@ -86,6 +121,9 @@ def source(
 
     settings = load_settings()
     try:
+        selected = _resolve_profile(settings, profile)
+        if not keyword:
+            keyword = selected.keywords[0]
         settings.require_places()
         metro_list = load_metros(metros)
         out_parent = out.resolve().parent
@@ -201,96 +239,6 @@ def _print_send_report(report) -> None:
             typer.echo(f"  {r.slug.ljust(width)}  {r.outcome.value:12}  {r.detail}")
 
 
-@app.command()
-def dm(
-    real: bool = typer.Option(False, "--send", help="Assist a real send (clipboard + browser + confirm). Default is preview."),
-    limit: int = typer.Option(None, "--limit", help="Walk at most N approved messenger notes this run"),
-    vault: Path = typer.Option(None, "--vault", help="Vault folder (default: Vault/Outreach)"),
-    yes: bool = typer.Option(False, "--yes", help="Skip the one upfront confirmation (per-note confirms still apply)"),
-):
-    """Assist manual Messenger delivery of approved messenger-channel notes
-    (Constitution v6.0.0 Principle I). The tool copies the draft to your
-    clipboard and opens the company's Facebook page in YOUR browser; you send it
-    yourself and confirm. Preview by default — nothing is opened or recorded."""
-    import webbrowser
-
-    from prospector import clipboard
-    from prospector.dm import run_dm
-    from prospector.models import DmCandidate
-
-    settings = load_settings()
-    target = vault or settings.vault_dir
-    if not target.is_dir():
-        typer.echo(f"error: vault folder not found: {target}", err=True)
-        raise typer.Exit(1)
-
-    if real and not yes:
-        preview = run_dm(settings, vault_dir=target, dry_run=True, limit=limit)
-        typer.echo(
-            f"About to walk {preview.would_deliver} approved messenger note(s); "
-            f"you will confirm each send yourself."
-        )
-        if not typer.confirm("Proceed?"):
-            typer.echo("aborted; nothing done.")
-            raise typer.Exit(0)
-
-    def _confirm(cand: "DmCandidate", *, copied: bool, opened: bool) -> str:
-        typer.echo("")
-        typer.echo(f"── {cand.company} ({cand.slug}) ──")
-        if opened:
-            typer.echo(f"  opened in your browser: {cand.facebook_url}")
-        elif cand.facebook_url:
-            typer.echo(f"  could not open a browser — open this yourself: {cand.facebook_url}")
-        else:
-            typer.echo("  no Facebook link on file — locate the company manually")
-        if copied:
-            typer.echo("  draft copied to your clipboard — paste it into Messenger")
-        else:
-            typer.echo("  (clipboard unavailable — copy the message below)")
-            typer.echo("")
-            typer.echo(cand.body or "")
-        answer = typer.prompt("  Did you send this message? [y/N/q]", default="n", show_default=False)
-        return answer
-
-    report = run_dm(
-        settings,
-        vault_dir=target,
-        dry_run=not real,
-        limit=limit,
-        confirm=_confirm,
-        opener=webbrowser.open,
-        copier=clipboard.copy_to_clipboard,
-    )
-    _print_dm_report(report, target)
-
-
-def _print_dm_report(report, vault_dir) -> None:
-    from prospector.models import DmOutcome
-
-    mode = "ASSISTED SEND" if not report.dry_run else "WOULD WALK (preview)"
-    typer.echo(f"\nProspector dm [{mode}]")
-    typer.echo(f"  vault: {vault_dir}")
-    head = "delivered" if not report.dry_run else "to walk"
-    head_n = report.delivered if not report.dry_run else report.would_deliver
-    typer.echo(
-        f"  {head}: {head_n}   skipped (already): {report.skipped_already}   "
-        f"skipped (not sendable): {report.skipped_not_sendable}   declined: {report.declined}"
-    )
-    interesting = {
-        DmOutcome.DELIVERED,
-        DmOutcome.WOULD_DELIVER,
-        DmOutcome.SKIPPED_NOT_SENDABLE,
-        DmOutcome.SKIPPED_ALREADY_SENT,
-    }
-    rows = [r for r in report.results if r.outcome in interesting]
-    if rows:
-        typer.echo("")
-        width = max(len(r.slug) for r in rows)
-        for r in rows:
-            detail = r.facebook_url or r.detail
-            typer.echo(f"  {r.slug.ljust(width)}  {r.outcome.value:20}  {detail}")
-
-
 def _print_sourcing_summary(summary) -> None:
     typer.echo(f"\nProspector source: {summary.metros_covered}/{summary.metros_total} metros covered")
     typer.echo(f"  queries used: {summary.queries_used}/{summary.query_budget}")
@@ -315,8 +263,18 @@ def _print_summary(summary: RunSummary) -> None:
         f"  named high: {summary.named_high}   medium: {summary.named_medium}   none: {summary.named_none}"
     )
     typer.echo(
-        f"  messenger: {summary.messenger}   duplicates: {summary.duplicates}   needs review: {summary.needs_review}"
+        f"  duplicates: {summary.duplicates}   needs review: {summary.needs_review}"
     )
+    # 008 FR-010: no company is silently bucketed — each is either processed or
+    # named here as unreachable.
+    typer.echo(
+        f"  email recovered: {summary.email_recovered}   no email found: {summary.no_email_skipped}"
+    )
+    if summary.skipped_companies:
+        typer.echo("\n  no email found:")
+        width = max(len(name) for name, _ in summary.skipped_companies)
+        for name, reason in summary.skipped_companies:
+            typer.echo(f"    {name.ljust(width)}  {reason}")
     typer.echo(
         f"  drafted by agent: {summary.drafted_agent}   by template: {summary.drafted_template}"
     )

@@ -10,16 +10,24 @@ from prospector.draft import (
     DraftError,
     assemble_email,
     build_email_draft,
-    build_messenger_draft,
     expected_greeting,
     is_generic_inbox,
     request_slots,
     validate_email_draft,
 )
-from prospector.models import Company, FbSignal, Prospect, ResearchResult, Variant
+from prospector.models import Company, Prospect, ResearchResult
 
-PRODUCT_URL = "https://www.omniveer.com/duct-lead-qualifier"
-SIGNATURE = "Anas\nFounder, Omniveer"
+# 008: the offer moved into the profile. Load the shipped reference profile so
+# these tests assert against the copy that actually ships, not a second copy
+# that could drift. It resolves through the packaged tier of the search path, so
+# no environment setup is needed here.
+from prospector.profiles import load as _load_profile
+
+PROFILE = _load_profile("duct-cleaning")
+PRODUCT_URL = PROFILE.product_url
+SIGNATURE = PROFILE.signature
+
+
 
 
 def make_prospect(email="scott@acmeduct.com", hook="Boston service area"):
@@ -44,7 +52,7 @@ GOOD_SLOTS = {
 class TestAssembly:
     def test_golden_email_draft(self):
         """Rev. 2 (2026-07-17): the operator-supplied copy, locked byte-for-byte."""
-        draft = assemble_email(make_prospect(email="info@acmeduct.com"), GOOD_SLOTS)
+        draft = assemble_email(make_prospect(email="info@acmeduct.com"), GOOD_SLOTS, PROFILE)
         assert draft.validated, draft.validation_errors
         assert draft.subject == "Free 10-day pilot for Acme Duct"
         assert draft.body == (
@@ -69,97 +77,59 @@ class TestAssembly:
 
     def test_same_body_for_generic_and_direct_inboxes(self):
         # rev. 2 dropped the generic-inbox forward-line opener
-        generic = assemble_email(make_prospect(email="info@acmeduct.com"), GOOD_SLOTS)
-        direct = assemble_email(make_prospect(email="scott@acmeduct.com"), GOOD_SLOTS)
+        generic = assemble_email(make_prospect(email="info@acmeduct.com"), GOOD_SLOTS, PROFILE)
+        direct = assemble_email(make_prospect(email="scott@acmeduct.com"), GOOD_SLOTS, PROFILE)
         assert generic.body == direct.body
         assert "forward it to whoever" not in generic.body
 
     def test_channel_neutral_no_facebook_mention(self):
-        draft = assemble_email(make_prospect(), GOOD_SLOTS)
+        draft = assemble_email(make_prospect(), GOOD_SLOTS, PROFILE)
         assert "facebook" not in draft.body.lower()
         assert "messages your page" not in draft.body.lower()
 
 
-class TestSignalNeutrality:
-    """Rev. 2: one channel-neutral body for every fb_signal level — the §7.5
-    honesty gate is satisfied by making no channel claims at all."""
+class TestChannelNeutrality:
+    """008: there is one channel-neutral body. Channel signals are no longer
+    researched, so the copy asserts nothing about the prospect's channels and
+    never claims ad-running (Constitution v7.0.0, Principle IV)."""
 
-    def test_strong_signal_gets_the_same_neutral_body(self):
-        strong = make_prospect()
-        strong.fb_signal = FbSignal.STRONG
-        strong.variant = Variant.EMAIL_FB
-        neutral = assemble_email(make_prospect(), GOOD_SLOTS)
-        draft = assemble_email(strong, GOOD_SLOTS)
-        assert draft.validated, draft.validation_errors
-        assert draft.body == neutral.body
+    def test_body_is_deterministic_for_identical_input(self):
+        assert assemble_email(make_prospect(), GOOD_SLOTS, PROFILE).body == assemble_email(make_prospect(), GOOD_SLOTS, PROFILE).body
 
-    def test_weak_and_none_signals_identical(self):
-        weak = make_prospect()
-        weak.fb_signal = FbSignal.WEAK
-        none_p = make_prospect()
-        assert assemble_email(weak, GOOD_SLOTS).body == assemble_email(none_p, GOOD_SLOTS).body
+    def test_never_claims_ads(self):
+        draft = assemble_email(make_prospect(), GOOD_SLOTS, PROFILE)
+        for banned in ("your ads", "ad campaign", "running ads", "advertis", "ad spend"):
+            assert banned not in draft.body.lower()
 
-    def test_never_claims_ads_at_any_signal(self):
-        for signal in (FbSignal.STRONG, FbSignal.WEAK, FbSignal.NONE):
-            prospect = make_prospect()
-            prospect.fb_signal = signal
-            draft = assemble_email(prospect, GOOD_SLOTS)
-            for banned in ("your ads", "ad campaign", "running ads", "advertis"):
-                assert banned not in draft.body.lower()
-
-
-class TestMessengerDm:
-    def test_dm_with_city_clause(self):
-        prospect = make_prospect()
-        prospect.variant = Variant.MESSENGER_DM
-        prospect.research.city = "Boston"
-        draft = build_messenger_draft(prospect)
-        assert draft.validated, draft.validation_errors
-        assert draft.subject is None
-        assert "It checks customers are real, around Boston, quotes your real prices" in draft.body
-        assert draft.body.startswith("Hey! I'm giving 5 duct cleaning companies")
-        assert draft.body.endswith("(See it working: https://www.omniveer.com/duct-lead-qualifier)")
-
-    def test_dm_without_city_drops_clause(self):
-        prospect = make_prospect()
-        prospect.variant = Variant.MESSENGER_DM
-        prospect.research.city = None
-        prospect.company.city = None
-        draft = build_messenger_draft(prospect)
-        assert draft.validated
-        assert ", around" not in draft.body
-        assert "It checks customers are real, quotes your real prices" in draft.body
-
-    def test_dm_is_deterministic_no_llm(self):
-        prospect = make_prospect()
-        prospect.variant = Variant.MESSENGER_DM
-        assert build_messenger_draft(prospect).body == build_messenger_draft(prospect).body
-        assert build_messenger_draft(prospect).model == "deterministic"
+    def test_makes_no_possessive_channel_claim(self):
+        body = assemble_email(make_prospect(), GOOD_SLOTS, PROFILE).body.lower()
+        for phrase in ("your facebook page", "your page", "your inbox", "your messenger"):
+            assert phrase not in body
 
 
 class TestValidator:
     def test_unfilled_slot_rejected(self):
         slots = dict(GOOD_SLOTS, subject_company="Acme [Duct]")
-        draft = assemble_email(make_prospect(), slots)
+        draft = assemble_email(make_prospect(), slots, PROFILE)
         assert not draft.validated
         assert any("unfilled" in e for e in draft.validation_errors)
 
     def test_ad_claim_in_tampered_body_rejected(self):
         prospect = make_prospect()
-        good = assemble_email(prospect, GOOD_SLOTS)
+        good = assemble_email(prospect, GOOD_SLOTS, PROFILE)
         tampered = good.body.replace("It responds to new leads", "It responds to your ads")
-        errors = validate_email_draft(good.subject, tampered, prospect, GOOD_SLOTS)
+        errors = validate_email_draft(good.subject, tampered, prospect, GOOD_SLOTS, PROFILE)
         assert any("ad-running claim" in e for e in errors)
 
     def test_wrong_greeting_rejected(self):
         slots = dict(GOOD_SLOTS, greeting_name="Steve")
-        draft = assemble_email(make_prospect(), slots)
+        draft = assemble_email(make_prospect(), slots, PROFILE)
         assert not draft.validated
         assert any("greeting" in e for e in draft.validation_errors)
 
     def test_subject_company_with_foreign_words_rejected(self):
         slots = dict(GOOD_SLOTS, subject_company="Acme Duct Experts")
-        draft = assemble_email(make_prospect(), slots)
+        draft = assemble_email(make_prospect(), slots, PROFILE)
         assert not draft.validated
         assert any("subject_company" in e for e in draft.validation_errors)
 
@@ -167,25 +137,25 @@ class TestValidator:
         # rev. 2 template is channel-neutral: their-activity phrasing may not
         # appear at ANY signal level, even via tampering
         prospect = make_prospect()
-        good = assemble_email(prospect, GOOD_SLOTS)
+        good = assemble_email(prospect, GOOD_SLOTS, PROFILE)
         tampered = good.body.replace(
             "It responds to new leads", "When someone messages your page, it responds"
         )
-        errors = validate_email_draft(good.subject, tampered, prospect, GOOD_SLOTS)
+        errors = validate_email_draft(good.subject, tampered, prospect, GOOD_SLOTS, PROFILE)
         assert any("their-page-activity" in e for e in errors)
 
     def test_altered_template_prose_rejected(self):
         prospect = make_prospect()
-        good = assemble_email(prospect, GOOD_SLOTS)
+        good = assemble_email(prospect, GOOD_SLOTS, PROFILE)
         tampered = good.body.replace("free 10-day pilot", "free 30-day trial")
-        errors = validate_email_draft(good.subject, tampered, prospect, GOOD_SLOTS)
+        errors = validate_email_draft(good.subject, tampered, prospect, GOOD_SLOTS, PROFILE)
         assert any("template prose altered" in e for e in errors)
 
     def test_missing_signature_rejected(self):
         prospect = make_prospect()
-        good = assemble_email(prospect, GOOD_SLOTS)
+        good = assemble_email(prospect, GOOD_SLOTS, PROFILE)
         tampered = good.body.replace(SIGNATURE, "Cheers,\nThe Omniveer Team")
-        errors = validate_email_draft(good.subject, tampered, prospect, GOOD_SLOTS)
+        errors = validate_email_draft(good.subject, tampered, prospect, GOOD_SLOTS, PROFILE)
         assert any("signature" in e for e in errors)
 
     def test_unsourced_name_rejected_even_when_greeting_matches(self):
@@ -193,34 +163,19 @@ class TestValidator:
         prospect = make_prospect()
         prospect.name_used = "Steve"
         slots = dict(GOOD_SLOTS, greeting_name="Steve")
-        draft = assemble_email(prospect, slots)
+        draft = assemble_email(prospect, slots, PROFILE)
         assert not draft.validated
         assert any("does not trace to a recorded source" in e for e in draft.validation_errors)
 
-    def test_sourced_name_accepted(self):
-        from prospector.models import Evidence, EvidenceKind
-
-        prospect = make_prospect()
-        prospect.name_used = "Scott"
-        prospect.research.name_evidence.append(
-            Evidence(kind=EvidenceKind.ABOUT_PAGE, value="Scott Brown", source="https://acmeduct.com/about")
-        )
-        slots = dict(GOOD_SLOTS, greeting_name="Scott")
-        draft = assemble_email(prospect, slots)
-        assert draft.validated, draft.validation_errors
-        assert draft.body.startswith("Hi Scott,")
-
 
 class TestLinkStrategy:
-    """005 FR-201..205: Omniveer branding + exactly one promotional link (the
-    product page), no homepage combo, no LinkedIn in the pitch, no legacy brand."""
+    """005: exactly one promotional link (the product page), no homepage combo,
+    no LinkedIn in the pitch, no legacy brand name.
+
+    008: only the email body remains — there is no second channel."""
 
     def all_golden_bodies(self):
-        email = assemble_email(make_prospect(email="info@acmeduct.com"), GOOD_SLOTS)
-        dm_prospect = make_prospect()
-        dm_prospect.variant = Variant.MESSENGER_DM
-        dm = build_messenger_draft(dm_prospect)
-        return {"email": email, "dm": dm}
+        return {"email": assemble_email(make_prospect(email="info@acmeduct.com"), GOOD_SLOTS, PROFILE)}
 
     def test_nestaro_branding_is_gone(self):
         for name, draft in self.all_golden_bodies().items():
@@ -245,20 +200,20 @@ class TestLinkStrategy:
 
     def test_second_promotional_link_is_rejected(self):
         prospect = make_prospect(email="info@acmeduct.com")
-        good = assemble_email(prospect, GOOD_SLOTS)
+        good = assemble_email(prospect, GOOD_SLOTS, PROFILE)
         tampered = good.body.replace(
             PRODUCT_URL, PRODUCT_URL + " and https://www.omniveer.com"
         )
-        errors = validate_email_draft(good.subject, tampered, prospect, GOOD_SLOTS)
+        errors = validate_email_draft(good.subject, tampered, prospect, GOOD_SLOTS, PROFILE)
         assert any("exactly one promotional link" in e for e in errors)
 
     def test_linkedin_injection_is_rejected(self):
         prospect = make_prospect(email="info@acmeduct.com")
-        good = assemble_email(prospect, GOOD_SLOTS)
+        good = assemble_email(prospect, GOOD_SLOTS, PROFILE)
         tampered = good.body.replace(
             PRODUCT_URL, "https://www.linkedin.com/company/omniveer/"
         )
-        errors = validate_email_draft(good.subject, tampered, prospect, GOOD_SLOTS)
+        errors = validate_email_draft(good.subject, tampered, prospect, GOOD_SLOTS, PROFILE)
         assert any("LinkedIn" in e for e in errors)
 
     def test_founder_led_signature_and_low_pressure_close(self):
@@ -321,7 +276,7 @@ class TestOpenRouterCall:
                 200, json={"choices": [{"message": {"content": json.dumps(GOOD_SLOTS)}}]}
             )
         )
-        draft = build_email_draft(make_prospect(email="info@acmeduct.com"), settings())
+        draft = build_email_draft(make_prospect(email="info@acmeduct.com"), settings(), PROFILE)
         assert draft.validated
         assert draft.model == "test/model"
 

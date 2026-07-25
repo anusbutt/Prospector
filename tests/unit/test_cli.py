@@ -81,10 +81,10 @@ class TestRunWiring:
         assert "unexpected error" in result.output
 
     def test_summary_table_printed(self, tmp_path, monkeypatch):
-        summary = RunSummary(total=2, processed=2, named_none=2, messenger=1)
+        summary = RunSummary(total=2, processed=2, named_none=2)
         summary.per_company = [("acme", "ok", "drafted"), ("beta", "ok", "no draft")]
         monkeypatch.setattr("prospector.pipeline.run_batch", lambda *a, **k: summary)
         result = runner.invoke(app, ["run", str(make_csv(tmp_path)), "--no-llm"])
         assert result.exit_code == 0
         assert "acme" in result.output and "beta" in result.output
-        assert "messenger: 1" in result.output
+        assert "no email found: 0" in result.output  # 008: replaces the messenger count

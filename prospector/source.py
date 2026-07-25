@@ -19,6 +19,7 @@ from selectolax.parser import HTMLParser
 import httpx
 
 from prospector.config import ConfigError
+from prospector.extract import EMAIL_RE, _plausible_email, extract_public_email
 from prospector.fetch import BlockedHostError, Fetcher, FetchError, is_blocked_host
 
 BUNDLED_METROS = "data/us_metros.txt"
@@ -268,38 +269,6 @@ def fetch_homepage(candidate: Candidate, fetcher: Fetcher, summary: SourcingSumm
         summary.failures.append((candidate.company, f"homepage returned {response.status_code}"))
         return None
     return response.text
-
-
-# Conservative: word-ish local part, dotted domain, 2+ letter TLD. Misses exotic
-# addresses on purpose — a missed email costs a messenger-bucket route, a wrong
-# one costs a bounced send.
-EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-ASSET_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg")
-
-
-def extract_public_email(html: str) -> str | None:
-    """First publicly listed email: mailto links beat plaintext (research.md R4).
-
-    Deterministic, never constructed: document order within each tier,
-    lowercased, mailto query params stripped, asset-name false positives dropped.
-    """
-    tree = HTMLParser(html)
-    for node in tree.css("a[href]"):
-        href = node.attributes.get("href") or ""
-        if href.lower().startswith("mailto:"):
-            address = unquote(href[7:]).split("?", 1)[0].strip().lower()
-            if _plausible_email(address):
-                return address
-    text = tree.body.text(separator=" ") if tree.body else html
-    for match in EMAIL_RE.finditer(text):
-        address = match.group().lower()
-        if _plausible_email(address):
-            return address
-    return None
-
-
-def _plausible_email(address: str) -> bool:
-    return bool(EMAIL_RE.fullmatch(address)) and not address.endswith(ASSET_SUFFIXES)
 
 
 def find_contact_link(html: str, base_url: str) -> str | None:

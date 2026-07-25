@@ -16,9 +16,14 @@ def load_notes(vault_dir):
 
 
 class TestSuccessCriteria:
-    def test_sc002_every_valid_row_produces_a_note(self, tmp_path, stubbed_network):
+    def test_sc002_every_reachable_row_produces_a_note(self, tmp_path, stubbed_network):
+        """008: every company is either noted or named as unreachable — there is
+        no third outcome and nothing is silently bucketed (SC-003)."""
         summary, vault_dir = run_fixture_batch(tmp_path)
-        assert len(company_notes(vault_dir)) == summary.total == 7
+        assert summary.total == 7
+        assert len(company_notes(vault_dir)) == summary.processed
+        assert summary.processed + summary.failed + summary.no_email_skipped == summary.total
+        assert summary.reconciles()
 
     def test_sc003_duplicates_leave_one_to_send_per_inbox(self, tmp_path, stubbed_network):
         _, vault_dir = run_fixture_batch(tmp_path)
@@ -30,16 +35,6 @@ class TestSuccessCriteria:
                 primaries_per_inbox[fm["email"]] = name
         duplicates = [n for n, t in load_notes(vault_dir).items() if frontmatter(t)["duplicate_of"]]
         assert duplicates == ["acme-duct-south.md"]
-
-    def test_sc004_messenger_rows_get_dm_and_queue(self, tmp_path, stubbed_network):
-        _, vault_dir = run_fixture_batch(tmp_path)
-        messenger = {
-            n: t for n, t in load_notes(vault_dir).items()
-            if frontmatter(t)["channel"] == "messenger"
-        }
-        assert messenger, "fixture batch must include a messenger row"
-        for text in messenger.values():
-            assert "Hey! I'm giving 5 duct cleaning companies a free 10-day pilot of the Omniveer Duct Lead Qualifier." in text
 
     def test_sc005_channel_honesty(self, tmp_path, stubbed_network):
         _, vault_dir = run_fixture_batch(tmp_path)

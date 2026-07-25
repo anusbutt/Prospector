@@ -3,8 +3,8 @@ import respx
 
 from prospector.config import Settings
 from prospector.fetch import Fetcher
-from prospector.models import Company, EvidenceKind
-from prospector.resolve import ResolveInfo, fb_search_evidence, resolve
+from prospector.models import Company
+from prospector.resolve import ResolveInfo, resolve
 
 from pathlib import Path
 
@@ -138,46 +138,3 @@ def ddg_html_with_snippets(*results):
     return f"<html><body>{blocks}</body></html>"
 
 
-class TestFbSearchEvidence:
-    @respx.mock
-    def test_active_fb_page_in_snippets_yields_evidence_without_fetching_fb(self):
-        respx.get(url__startswith="https://html.duckduckgo.com/html/").mock(
-            return_value=httpx.Response(200, text=ddg_html_with_snippets(
-                ("https://www.facebook.com/acmeduct", "Acme Duct Cleaning | Facebook",
-                 "Acme Duct Cleaning. 312 likes. Posted 3 days ago: fall specials"),
-            ))
-        )
-        fb = respx.get(url__startswith="https://www.facebook.com").mock(return_value=httpx.Response(200))
-        info = ResolveInfo()
-        evidence = fb_search_evidence(ACME, instant_fetcher(), info)
-        assert evidence is not None
-        assert evidence.kind is EvidenceKind.FB_SEARCH_ACTIVE
-        assert evidence.value == "https://www.facebook.com/acmeduct"
-        assert fb.call_count == 0, "the FB page itself must never be fetched"
-
-    @respx.mock
-    def test_fb_page_without_activity_cues_defaults_down_to_nothing(self):
-        respx.get(url__startswith="https://html.duckduckgo.com/html/").mock(
-            return_value=httpx.Response(200, text=ddg_html_with_snippets(
-                ("https://www.facebook.com/acmeduct", "Acme Duct", "A page on Facebook"),
-            ))
-        )
-        assert fb_search_evidence(ACME, instant_fetcher(), ResolveInfo()) is None
-
-    @respx.mock
-    def test_no_fb_result_yields_nothing(self):
-        respx.get(url__startswith="https://html.duckduckgo.com/html/").mock(
-            return_value=httpx.Response(200, text=ddg_html_with_snippets(
-                ("https://acmeduct.com", "Acme Duct Cleaning", "official site, 500 reviews"),
-            ))
-        )
-        assert fb_search_evidence(ACME, instant_fetcher(), ResolveInfo()) is None
-
-    @respx.mock
-    def test_search_failure_recorded_not_raised(self):
-        respx.get(url__startswith="https://html.duckduckgo.com/html/").mock(
-            side_effect=httpx.ConnectTimeout("down")
-        )
-        info = ResolveInfo()
-        assert fb_search_evidence(ACME, instant_fetcher(), info) is None
-        assert any("ddg fb search failed" in f for f in info.failures)

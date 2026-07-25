@@ -14,22 +14,27 @@ from prospector import ingest, resolve, score, vault
 from prospector.config import Settings
 from prospector.fetch import Fetcher, FetchError
 from prospector.models import (
-    Channel,
     Company,
     Confidence,
     Draft,
     Evidence,
     EvidenceKind,
-    FbSignal,
     Prospect,
     ResearchResult,
     RunSummary,
-    Variant,
 )
 
 
 def _log(message: str) -> None:
     print(message, file=sys.stderr)
+
+
+class NoEmailFound(Exception):
+    """A company had no supplied address and none could be recovered (008 FR-009).
+
+    Distinct from a processing failure: nothing went wrong, the company simply
+    cannot be reached by email. It is skipped without a note and reported by
+    name in the run summary — never bucketed to another channel."""
 
 
 def run_batch(
@@ -43,10 +48,12 @@ def run_batch(
     verbose: bool = False,
     fetcher: Fetcher | None = None,
     instructions=None,
+    profile=None,
 ) -> RunSummary:
     """Process a batch. Raises IngestError only for pre-flight problems.
 
-    `instructions` is the pre-flighted InstructionSet for agent drafting; when
+    `profile` is the pre-flighted offer profile (008) — it supplies the copy
+    constants and note tags. `instructions` is its InstructionSet; when
     None the drafting path falls back to the locked template (FR-315)."""
     vault_dir = Path(vault_dir) if vault_dir else settings.vault_dir
     fetcher = fetcher or Fetcher()
@@ -78,16 +85,28 @@ def run_batch(
                 verbose=verbose,
                 frozen=frozen,
                 instructions=instructions,
+                profile=profile,
             )
-            outcome, detail = _write(prospect, draft, vault_dir, no_llm=no_llm, frozen=frozen)
+            outcome, detail = _write(prospect, draft, vault_dir, no_llm=no_llm, frozen=frozen, profile=profile)
             _count_drafting_path(summary, company.slug, draft)
+            if prospect.research.email_evidence is not None:
+                summary.email_recovered += 1
             summary.processed += 1
+        except NoEmailFound as exc:
+            # FR-009: no note is written; the company is named in the summary so
+            # an unreachable prospect is visible rather than silently dropped.
+            if verbose:
+                _log(f"skipped {company.slug}: {exc}")
+            summary.no_email_skipped += 1
+            summary.skipped_companies.append((company.company, str(exc)))
+            summary.per_company.append((company.slug, "skipped", f"no email found ({exc})"))
+            continue
         except Exception as exc:  # per-company isolation (FR-021)
             _log(f"error: {company.slug}: {exc}")
             prospect = Prospect(company=company, research=ResearchResult(website=company.website))
             prospect.needs_review = True
             prospect.research.failures.append(f"processing failed: {exc}")
-            _write(prospect, None, vault_dir, no_llm=no_llm, frozen=frozen)
+            _write(prospect, None, vault_dir, no_llm=no_llm, frozen=frozen, profile=profile)
             summary.failed += 1
             outcome, detail = "failed", str(exc)
         _count(summary, prospect)
@@ -105,8 +124,11 @@ def _process_company(
     verbose: bool,
     frozen: bool = False,
     instructions=None,
+    profile=None,
 ) -> tuple[Prospect, Draft | None]:
     research = _research(company, settings, fetcher, verbose=verbose)
+    if not company.email:
+        raise NoEmailFound(company.bucket_reason or "no email address found")
     prospect = _score(company, research, settings)
     draft: Draft | None = None
     if no_llm:
@@ -115,15 +137,11 @@ def _process_company(
         # FR-326: approved/sent copy is never regenerated, so no drafting call
         # is made at all. ## Research still refreshes from the work above.
         return prospect, draft
-    if company.channel is Channel.EMAIL:
-        # 006: agent path with automatic template fallback. Never raises, so
-        # the batch cannot be aborted by a drafting failure (FR-318).
-        draft = agent_draft.draft_email(prospect, settings, instructions)
-        if draft.validation_errors:
-            research.failures.extend(draft.validation_errors)
-    else:
-        # FR-308: messenger DMs stay fully deterministic — no model call.
-        draft = drafting.build_messenger_draft(prospect)
+    # 006: agent path with automatic template fallback. Never raises, so the
+    # batch cannot be aborted by a drafting failure (FR-318).
+    draft = agent_draft.draft_email(prospect, settings, instructions, profile)
+    if draft.validation_errors:
+        research.failures.extend(draft.validation_errors)
     if draft is not None and not draft.validated:
         prospect.needs_review = True
     return prospect, draft
@@ -147,27 +165,23 @@ def _research(company: Company, settings: Settings, fetcher: Fetcher, *, verbose
                 if html is not None:
                     pages.append(extracting.PageContent(kind, url, html))
 
+    # 008 FR-006: no supplied address -> look for one the company publishes on
+    # the pages we already fetched. No new request is made (FR-011).
+    if not company.email and pages:
+        recovered, evidence = extracting.recover_email(pages)
+        if recovered:
+            company.email = recovered
+            research.email_evidence = evidence
+
     if pages:
         outcome = extracting.extract(company, pages)
         research.name_evidence = outcome.name_evidence
         research.hook = outcome.hook
         research.hook_evidence = outcome.hook_evidence
         research.city = outcome.city
-        research.fb_evidence.extend(extracting.detect_fb_evidence(pages))
 
-    search_evidence = resolve.fb_search_evidence(company, fetcher, info)
-    # fb_search_evidence appended to info; union with page-fetch entries, order-stable
     research.sources_consulted = list(dict.fromkeys(research.sources_consulted + info.sources_consulted))
     research.failures = list(dict.fromkeys(research.failures + info.failures))
-    if search_evidence:
-        research.fb_evidence.append(search_evidence)
-    if company.facebook_url:
-        research.fb_evidence.append(
-            Evidence(
-                kind=EvidenceKind.FB_URL_INPUT, value=company.facebook_url,
-                source=f"input row {company.row_num}", excerpt="facebook_url provided as input (never fetched)",
-            )
-        )
 
     research.city = company.city or research.city or research.gbp_city
     if not research.hook and research.city:
@@ -194,7 +208,7 @@ def _fetch_page(url: str, fetcher: Fetcher, research: ResearchResult, *, check_r
 
 
 def _score(company: Company, research: ResearchResult, settings: Settings) -> Prospect:
-    """Name confidence per §7 (score.py). fb_signal §7.5 rules arrive in US3 (T018)."""
+    """Name confidence scoring (score.py)."""
     prospect = Prospect(company=company, research=research)
 
     email_inference = enrich.infer_from_email(company.email)
@@ -213,31 +227,31 @@ def _score(company: Company, research: ResearchResult, settings: Settings) -> Pr
             research.name_evidence.append(hunter_inference.evidence)
     score.apply_name_scoring(prospect, email_inference, hunter_inference)
 
-    prospect.fb_signal = score.classify_fb_signal(research.fb_evidence)
-    prospect.variant = score.select_variant(company.channel, prospect.fb_signal)
     if research.failures and not research.website:
         prospect.needs_review = True
     return prospect
 
 
 def _write(
-    prospect: Prospect, draft: Draft | None, vault_dir: Path, *, no_llm: bool, frozen: bool = False
+    prospect: Prospect, draft: Draft | None, vault_dir: Path, *, no_llm: bool,
+    frozen: bool = False, profile=None,
 ) -> tuple[str, str]:
-    draft_md = vault.draft_markdown_for(draft, prospect, no_llm=no_llm and prospect.company.channel is Channel.EMAIL)
+    draft_md = vault.draft_markdown_for(draft, prospect, no_llm=no_llm)
     research_md = vault.build_research_markdown(prospect)
     # Rebuilt rather than carried: id assignment is deterministic over the same
     # research, so this reproduces exactly what the validator resolved against.
     citations_md = vault.build_citations_markdown(
         draft, agent_draft.build_evidence_refs(prospect.research)
     )
-    note = vault.render_note(
-        prospect, draft_md, research_md, draft=draft, citations_markdown=citations_md
-    )
+    render_kwargs = {"draft": draft, "citations_markdown": citations_md}
+    if profile is not None:
+        render_kwargs["tags_line"] = profile.tags_line
+    note = vault.render_note(prospect, draft_md, research_md, **render_kwargs)
     result = vault.upsert_note(vault_dir, prospect.company.slug, note, freeze_draft=frozen)
     if frozen:
         detail = f"draft frozen (approved/sent), research refreshed, note {result}"
     elif draft is not None and draft.validated:
-        detail = f"drafted ({prospect.variant.value}), note {result}"
+        detail = f"drafted ({draft.source}), note {result}"
     elif draft is not None:
         detail = f"draft failed validation, note {result}"
     else:
@@ -248,13 +262,11 @@ def _write(
 def _count_drafting_path(summary: RunSummary, slug: str, draft: Draft | None) -> None:
     """Drafting-path visibility (FR-320).
 
-    Only email-channel drafts have a path: messenger DMs are deterministic and
-    frozen/--no-llm companies are not drafted at all, so neither is counted.
+    Frozen and --no-llm companies are not drafted at all, so they are not
+    counted.
     The fallback REASON is recorded, not just the count — a silent 40% fallback
     rate would otherwise look like slightly boring copy rather than a break."""
     if draft is None or draft.source not in ("agent", "template"):
-        return
-    if draft.model == "deterministic":  # messenger DM
         return
     if draft.source == "agent":
         summary.drafted_agent += 1
@@ -275,8 +287,6 @@ def _count(summary: RunSummary, prospect: Prospect) -> None:
         summary.named_medium += 1
     else:
         summary.named_none += 1
-    if prospect.company.channel is Channel.MESSENGER:
-        summary.messenger += 1
     if prospect.company.duplicate_of:
         summary.duplicates += 1
     if prospect.needs_review or prospect.company.needs_review:

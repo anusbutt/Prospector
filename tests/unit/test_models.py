@@ -1,7 +1,6 @@
 from prospector.models import (
     OFFER_CITE,
     AgentResponse,
-    Channel,
     Company,
     Confidence,
     Draft,
@@ -9,20 +8,17 @@ from prospector.models import (
     Evidence,
     EvidenceKind,
     EvidenceRef,
-    FbSignal,
     Prospect,
     ResearchResult,
     RunSummary,
-    Variant,
 )
 
 
 def test_enum_values_match_product_vocab():
     # §6 frontmatter vocabulary
-    assert {c.value for c in Channel} == {"email", "messenger"}
     assert {c.value for c in Confidence} == {"high", "medium", "none"}
-    assert {s.value for s in FbSignal} == {"strong", "weak", "none"}
-    assert {v.value for v in Variant} == {"email_fb", "email_agnostic", "messenger_dm"}
+    # 008: email is the only channel, so it is a literal string, not an enum
+    assert Company(company="X", email=None).channel == "email"
 
 
 def test_construction_and_defaults():
@@ -31,8 +27,6 @@ def test_construction_and_defaults():
     prospect = Prospect(company=company, research=research)
     assert prospect.name_used == "team"
     assert prospect.name_confidence is Confidence.NONE
-    assert prospect.fb_signal is FbSignal.NONE
-    assert prospect.variant is Variant.EMAIL_AGNOSTIC
     assert prospect.angle == "offer-led"
     assert not prospect.needs_review
     assert company.facebook_url is None

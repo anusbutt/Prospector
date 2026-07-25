@@ -27,5 +27,7 @@ def test_sourced_csv_loads_into_001_ingest(tmp_path):
     assert emailed.email == "info@acme.com"
     assert emailed.website is not None and "acme.com" in emailed.website
     assert emailed.city == "Boston, MA"
-    # Blank email routes to the messenger bucket, unchanged 001 behavior.
-    assert silent.channel == "messenger"
+    # 008: a blank email means no address supplied — still email-channel,
+    # recovered or reported later; never bucketed.
+    assert silent.email is None
+    assert silent.channel == "email"

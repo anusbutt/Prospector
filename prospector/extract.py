@@ -5,7 +5,7 @@ extracted datum carries its source and excerpt (research.md R3).
 
 import re
 from dataclasses import dataclass, field
-from urllib.parse import urljoin, urlparse
+from urllib.parse import unquote, urljoin, urlparse
 
 import trafilatura
 from selectolax.parser import HTMLParser
@@ -197,48 +197,6 @@ def _find_hook(page: PageContent, text: str, outcome: ExtractOutcome) -> None:
         )
 
 
-FB_HOST_RE = re.compile(r"(?:^|//|\.)(?:facebook\.com|fb\.com|fb\.me)/", re.IGNORECASE)
-FB_WIDGET_MARKERS = ("connect.facebook.net", "xfbml.customerchat", "fb-customerchat", "fb-messenger-checkbox")
-FB_EMBED_MARKERS = ("facebook.com/plugins", "facebook.com/v2.0/plugins")
-
-
-def detect_fb_evidence(pages: list[PageContent]) -> list[Evidence]:
-    """Open-web Facebook-usage signals (§7.5), string-detected from HTML we
-    already fetched. Nothing here ever fetches, executes, or renders anything
-    from a Facebook host (Constitution II). One Evidence per signal kind."""
-    found: dict[EvidenceKind, Evidence] = {}
-    for page in pages:
-        tree = HTMLParser(page.html)
-
-        if EvidenceKind.FB_LINK not in found:
-            for node in tree.css("a[href]"):
-                href = node.attributes.get("href") or ""
-                if FB_HOST_RE.search(href) and not any(m in href for m in FB_EMBED_MARKERS):
-                    found[EvidenceKind.FB_LINK] = Evidence(
-                        kind=EvidenceKind.FB_LINK, value=href, source=page.url,
-                        excerpt="site links to a Facebook page",
-                    )
-                    break
-
-        if EvidenceKind.FB_EMBED not in found:
-            for node in tree.css("iframe[src]"):
-                src = node.attributes.get("src") or ""
-                if any(m in src for m in FB_EMBED_MARKERS):
-                    found[EvidenceKind.FB_EMBED] = Evidence(
-                        kind=EvidenceKind.FB_EMBED, value=src, source=page.url,
-                        excerpt="Facebook page embedded on site (plugin iframe)",
-                    )
-                    break
-
-        if EvidenceKind.FB_WIDGET not in found and any(m in page.html for m in FB_WIDGET_MARKERS):
-            marker = next(m for m in FB_WIDGET_MARKERS if m in page.html)
-            found[EvidenceKind.FB_WIDGET] = Evidence(
-                kind=EvidenceKind.FB_WIDGET, value=marker, source=page.url,
-                excerpt="Messenger/FB chat widget markup on site",
-            )
-    return list(found.values())
-
-
 def _excerpt(text: str, position: int, width: int = 100) -> str:
     start = max(0, position - width // 2)
     return " ".join(text[start : position + width].split())[:200]
@@ -253,3 +211,92 @@ def _dedupe_names(outcome: ExtractOutcome) -> None:
             seen.add(key)
             unique.append(evidence)
     outcome.name_evidence = unique
+
+
+# Conservative: word-ish local part, dotted domain, 2+ letter TLD. Misses exotic
+# addresses on purpose — a missed email costs a reported skip, a wrong one
+# costs a bounced send.
+EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+ASSET_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg")
+
+
+def extract_public_email(html: str) -> str | None:
+    """First publicly listed email: mailto links beat plaintext (research.md R4).
+
+    Deterministic, never constructed: document order within each tier,
+    lowercased, mailto query params stripped, asset-name false positives dropped.
+    """
+    tree = HTMLParser(html)
+    for node in tree.css("a[href]"):
+        href = node.attributes.get("href") or ""
+        if href.lower().startswith("mailto:"):
+            address = unquote(href[7:]).split("?", 1)[0].strip().lower()
+            if _plausible_email(address):
+                return address
+    text = tree.body.text(separator=" ") if tree.body else html
+    for match in EMAIL_RE.finditer(text):
+        address = match.group().lower()
+        if _plausible_email(address):
+            return address
+    return None
+
+
+def _plausible_email(address: str) -> bool:
+    return bool(EMAIL_RE.fullmatch(address)) and not address.endswith(ASSET_SUFFIXES)
+
+
+# Page priority for address recovery (008 research.md R2): an address published
+# on a contact page is the intended point of contact; the homepage is the last
+# resort. Ranking pages rather than trusting fetch order makes the choice
+# deterministic — identical research always adopts the same address (FR-006).
+_RECOVERY_PAGE_PRIORITY = ("contact", "about", "team", "homepage")
+
+
+def _registrable(host: str) -> str:
+    """Last two labels of a host — a cheap same-organisation key.
+
+    Deliberately naive (it treats "co.uk" as registrable); it only has to be
+    consistent, because it is used to compare a page's host with an address's
+    domain, not to parse the public suffix list."""
+    parts = [p for p in (host or "").lower().split(".") if p]
+    return ".".join(parts[-2:]) if len(parts) >= 2 else ".".join(parts)
+
+
+def recover_email(pages: list[PageContent]) -> tuple[str | None, Evidence | None]:
+    """Find a published address on pages ALREADY fetched for research.
+
+    Returns (address, evidence) or (None, None). Reads only what it is given —
+    it issues no request, so recovery costs no extra traffic and cannot reach a
+    blocked host (FR-011). The adopted address is returned with an
+    EMAIL_PUBLISHED evidence record naming the page it came from, so a wrong
+    adoption is auditable in the note rather than invisible (FR-007).
+
+    An address is adopted ONLY when its domain matches the host of the page it
+    was found on. Website resolution can land on the wrong site (a DuckDuckGo
+    fallback resolved an invented company to an unrelated domain and offered a
+    stranger's personal Gmail), and unlike a wrong `website` field a wrong
+    address is something we would actually mail. Defaulting down is the standing
+    rule here: a missed address costs a reported skip, a wrong one costs
+    contacting someone who never published themselves as a business."""
+    ranked = sorted(
+        pages,
+        key=lambda p: (
+            _RECOVERY_PAGE_PRIORITY.index(p.kind)
+            if p.kind in _RECOVERY_PAGE_PRIORITY
+            else len(_RECOVERY_PAGE_PRIORITY)
+        ),
+    )
+    for page in ranked:
+        address = extract_public_email(page.html)
+        if address is None:
+            continue
+        page_domain = _registrable(urlparse(page.url).hostname or "")
+        if page_domain and _registrable(address.rsplit("@", 1)[-1]) != page_domain:
+            continue  # published on this page, but not this organisation's address
+        return address, Evidence(
+            kind=EvidenceKind.EMAIL_PUBLISHED,
+            value=address,
+            source=page.url,
+            excerpt=f"published on the {page.kind}" if page.kind == "homepage" else f"published on the {page.kind} page",
+        )
+    return None, None

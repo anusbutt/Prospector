@@ -9,6 +9,7 @@ import httpx
 from prospector.config import Settings
 from prospector.fetch import Fetcher
 from prospector.pipeline import run_batch
+from prospector.profiles import load as load_profile
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 SITES = FIXTURES / "sites"
@@ -107,6 +108,10 @@ def run_fixture_batch(tmp_path, csv_content=CSV_CONTENT, **kwargs):
     csv_path.write_text(csv_content)
     vault_dir = tmp_path / "Vault" / "Outreach"
     fetcher = Fetcher(clock=lambda: 0.0, sleep=lambda s: None)
+    # 008: every run selects an offer profile; the reference profile keeps these
+    # fixtures asserting against the copy that actually ships.
+    kwargs.setdefault("profile", load_profile("duct-cleaning"))
+    kwargs.setdefault("instructions", kwargs["profile"].instructions)
     summary = run_batch(csv_path, settings(vault_dir), vault_dir=vault_dir, fetcher=fetcher, **kwargs)
     return summary, vault_dir
 
