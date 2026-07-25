@@ -14,9 +14,10 @@
 - [ ] Change is focused (no unrelated refactors)
 - [ ] Secrets are not logged, printed, or committed
 - [ ] The safety guarantees in [CONTRIBUTING.md](../CONTRIBUTING.md) are preserved
-      (Facebook never contacted · sending stays human-approved · nothing
-      fabricated · Messenger delivery stays human-performed). If this PR touches
-      any of them, explain below how the guarantee is upheld.
+      (Facebook never contacted · email is the only channel · sending stays
+      human-approved · nothing fabricated · profiles stay content, not
+      capability). If this PR touches any of them, explain below how the
+      guarantee is upheld.
 
 ## Notes for reviewers
 
