@@ -14,35 +14,74 @@ code and covered by the test suite. **A change that weakens any of them will not
 be merged**, even if it is otherwise useful. If you believe one genuinely needs
 to change, open an issue to discuss it first — don't work around it in a PR.
 
-1. **Facebook is never contacted.** The tool makes no request to any Facebook or
-   Messenger host — no Graph API, no scraping, no fetching a `facebook_url`. All
-   outbound HTTP passes through a host guard that rejects those hosts before any
-   network activity. Facebook URLs are stored only as input/target signals.
-   *(See the fetch host-guard and its tests.)*
+These correspond to the numbered principles in
+`.specify/memory/constitution.md` (v7.0.0).
 
-2. **Sending is human-approved only.** The tool never sends anything a human has
-   not explicitly marked `status: approved`. Real sending requires an explicit
-   flag (dry-run is the default), is bound to the configured dedicated mailbox,
-   is capped, and every send is recorded in an append-only ledger that prevents
+1. **Human-approved sending only** *(Principle I)*. Email is the only
+   communication channel. The tool never sends anything a human has not
+   explicitly marked `status: approved`. Real sending requires an explicit flag
+   (dry-run is the default), is bound to the configured dedicated mailbox, is
+   capped, and every send is recorded in an append-only ledger that prevents
    duplicates. No copy is generated or altered on the send path.
    *(See `prospector/send.py` and its tests.)*
 
-3. **Nothing is fabricated.** Names, personalization hooks, and any claim about a
-   prospect must be backed by captured evidence and validated deterministically
-   in plain Python. Copy that cannot be validated is discarded and replaced with
-   a locked fallback template. Validation is never delegated to a model.
+2. **Open web only — Facebook is never accessed** *(Principle II)*. The tool
+   makes no request to any Facebook or Messenger host — no Graph API, no
+   scraping, no fetching a Facebook URL. All outbound HTTP passes through a host
+   guard that rejects those hosts before any network activity. Facebook-owned
+   markup found on a company's *own* site (the Meta Pixel) may be read as a
+   sourcing signal, but the URLs in it are never requested.
+   *(See `BLOCKED_HOSTS` in `prospector/fetch.py` and its tests.)*
+
+3. **Obsidian is the interface** *(Principle III)*. Output is plain Markdown
+   notes plus a dashboard note. No web UI, server, or GUI is added.
+
+4. **Evidence-bound copy — never fabricate** *(Principle IV)*. Names,
+   personalization hooks, and any claim about a prospect must be backed by
+   captured evidence and validated deterministically in plain Python. Copy that
+   cannot be validated is discarded and replaced with the selected profile's
+   locked fallback template. Validation is never delegated to a model.
    *(See `prospector/draft.py` / `prospector/agent_draft.py` and their tests.)*
 
-4. **Assisted Messenger delivery is human-performed.** `prospector dm` may copy a
-   draft to your clipboard and open a page in *your own* browser, but the tool
-   never sends a Messenger message and never automates a browser. You send it.
-   *(See `prospector/dm.py` and its tests.)*
+5. **Verified claims only** *(Principle VII)*. Nothing is asserted about a
+   prospect that the tool has not observed. In particular, Meta Pixel presence
+   is a targeting filter and is never presented as evidence that a company runs
+   advertising.
 
-5. **The Obsidian vault is the interface.** Output is plain Markdown notes plus a
-   dashboard note. No web UI, server, or GUI is added.
+Principle V (Channel Honesty) was **retired in v7.0.0** along with the Messenger
+channel: the copy makes no claim about a prospect's channels, so the gate it
+guarded is satisfied trivially. Do not reintroduce a channel-fit signal without
+amending the constitution first.
 
 If your change touches any of these areas, please call out in your PR how the
 guarantee is preserved, and add or update the test that proves it.
+
+## Profiles are content, and they are reviewed
+
+Everything vertical-specific — the offer, the sender identity, the writing
+guidance, the locked fallback copy, the note tags, the promotional link, and the
+default sourcing keywords — lives in a profile directory rather than in Python.
+Adding a vertical must never require a code change. Operators keep their profiles
+in `./profiles/<name>/`; the repo ships one reference profile inside the package
+at `prospector/profiles/duct-cleaning/`.
+
+Profiles are **content, not configuration-as-escape-hatch**. Review them the way
+you review prose, and hold them to two rules:
+
+- A profile cannot widen what the tool may do. It grants the drafting model no
+  tools, no network, and no filesystem access, and it cannot disable citation
+  validation, the locked-fallback rule, approval-gated sending, or the Facebook
+  host guard. If a proposed profile key would weaken a guarantee above, the
+  answer is no.
+- A profile must never contain secrets, credentials, or a URL intended to be
+  fetched. Credentials come from `.env`.
+
+A profile is validated in full *before* any company is processed, so a malformed
+one costs nothing and writes nothing. When you add a key, extend
+`prospector/profiles.py` validation in the same PR — a key that silently defaults
+is a key that silently ships the wrong copy. `prospector/profiles/duct-cleaning/` is
+the bundled reference profile; keep it working, since the test suite asserts
+against the copy it actually ships.
 
 ## Getting set up
 
@@ -64,7 +103,7 @@ environment. See the "Running the CLI" section of the [README](README.md).
 ```bash
 pytest              # full suite
 pytest -q           # quieter
-pytest tests/unit/test_dm.py            # a single file
+pytest tests/unit/test_profiles.py      # a single file
 pytest -k facebook                      # tests matching a keyword
 ```
 
