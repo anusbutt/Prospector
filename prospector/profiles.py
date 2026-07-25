@@ -32,6 +32,7 @@ REQUIRED_FILES = (
 
 REQUIRED_KEYS = ("tags", "signature", "product_url", "keywords", "banned_claims")
 
+SUBJECT_HEADING = "## Subject"
 TEMPLATE_HEADING = "## Template"
 INVARIANTS_HEADING = "## Invariants"
 
@@ -43,6 +44,7 @@ class Profile:
     name: str
     root: Path
     instructions: InstructionSet
+    fallback_subject: str
     fallback_template: str
     fallback_invariants: list[str]
     tags: list[str]
@@ -113,18 +115,21 @@ def _read(root: Path, name: str, relative: str) -> str:
     return content
 
 
-def _parse_fallback(name: str, text: str) -> tuple[str, list[str]]:
+def _parse_fallback(name: str, text: str) -> tuple[str, str, list[str]]:
     """Split fallback.md into its locked template and its invariants.
 
     Both sections are mandatory: the template is what answers when generated
     copy fails validation, and the invariants are what prove it was not
     paraphrased on the way out."""
-    if TEMPLATE_HEADING not in text or INVARIANTS_HEADING not in text:
-        raise ConfigError(
-            f"profile {name!r}: fallback.md must contain "
-            f"'{TEMPLATE_HEADING}' and '{INVARIANTS_HEADING}'"
-        )
-    _, rest = text.split(TEMPLATE_HEADING, 1)
+    for heading in (SUBJECT_HEADING, TEMPLATE_HEADING, INVARIANTS_HEADING):
+        if heading not in text:
+            raise ConfigError(
+                f"profile {name!r}: fallback.md must contain "
+                f"'{SUBJECT_HEADING}', '{TEMPLATE_HEADING}' and '{INVARIANTS_HEADING}'"
+            )
+    _, after_subject = text.split(SUBJECT_HEADING, 1)
+    subject_block, rest = after_subject.split(TEMPLATE_HEADING, 1)
+    subject = subject_block.strip()
     template, invariant_block = rest.split(INVARIANTS_HEADING, 1)
     template = template.strip("\n")
     invariants = [
@@ -134,9 +139,11 @@ def _parse_fallback(name: str, text: str) -> tuple[str, list[str]]:
     ]
     if not template.strip():
         raise ConfigError(f"profile {name!r}: fallback.md has an empty {TEMPLATE_HEADING} section")
+    if not subject:
+        raise ConfigError(f"profile {name!r}: fallback.md has an empty {SUBJECT_HEADING} section")
     if not invariants:
         raise ConfigError(f"profile {name!r}: fallback.md lists no invariants")
-    return template, invariants
+    return subject, template, invariants
 
 
 def _parse_config(name: str, text: str) -> dict:
@@ -159,7 +166,7 @@ def load(name: str) -> Profile:
     for relative in REQUIRED_FILES:
         _read(root, name, relative)  # presence + non-empty
 
-    template, invariants = _parse_fallback(name, _read(root, name, "fallback.md"))
+    subject, template, invariants = _parse_fallback(name, _read(root, name, "fallback.md"))
     config = _parse_config(name, _read(root, name, "profile.toml"))
 
     try:
@@ -171,6 +178,7 @@ def load(name: str) -> Profile:
         name=name,
         root=root,
         instructions=instructions,
+        fallback_subject=subject,
         fallback_template=template,
         fallback_invariants=invariants,
         tags=list(config["tags"]),

@@ -23,10 +23,7 @@ import httpx
 
 from prospector.config import Settings
 from prospector.draft import (
-    AD_CLAIM_SUBSTRINGS,
     OPENROUTER_URL,
-    PRODUCT_URL,
-    SIGNATURE,
     DraftError,
     _strip_code_fences,
     build_email_draft,
@@ -214,14 +211,14 @@ def parse_response(content: str) -> AgentResponse:
 # --- Assembly ---------------------------------------------------------------
 
 
-def assemble_body(prospect: Prospect, response: AgentResponse) -> str:
+def assemble_body(prospect: Prospect, response: AgentResponse, profile) -> str:
     """Greeting + blocks + signature, all in code (FR-306).
 
     The model's prose is never edited here — only accepted whole or rejected
     whole."""
     parts = [f"Hi {expected_greeting(prospect)},"]
     parts.extend(block.text for block in response.blocks)
-    parts.append(SIGNATURE)
+    parts.append(profile.signature)
     return "\n\n".join(parts)
 
 
@@ -324,25 +321,25 @@ def validate_channel_claims(response: AgentResponse, prospect: Prospect) -> list
     return errors
 
 
-def validate_retained(subject: str, body: str, prospect: Prospect) -> list[str]:
+def validate_retained(subject: str, body: str, prospect: Prospect, profile) -> list[str]:
     """Rules V5-V12 (§5.2): the checks that survive free prose, reusing
-    `draft.py`'s existing predicates and constants."""
+    `draft.py`'s predicates and the selected profile's offer constants."""
     errors: list[str] = []
     lowered = body.lower()
 
     if re.search(r"\[[^\]\n]{1,60}\]", body) or re.search(r"\[[^\]\n]{1,60}\]", subject):
         errors.append("unfilled [slot] remains")
 
-    for banned in AD_CLAIM_SUBSTRINGS:
+    for banned in profile.banned_claims:
         if banned in lowered or banned in subject.lower():
             errors.append(f"ad-running claim detected: {banned!r}")
 
-    if body.count("http") != 1 or PRODUCT_URL not in body:
+    if body.count("http") != 1 or profile.product_url not in body:
         errors.append("body must carry exactly one promotional link (the product page)")
     if "linkedin.com" in lowered:
         errors.append("LinkedIn link may not appear in the pitch")
 
-    if not body.rstrip().endswith(SIGNATURE):
+    if not body.rstrip().endswith(profile.signature):
         errors.append("signature altered or missing")
 
     expected = expected_greeting(prospect)
@@ -387,20 +384,20 @@ def validate_retained(subject: str, body: str, prospect: Prospect) -> list[str]:
     return errors
 
 
-def validate(response: AgentResponse, body: str, prospect: Prospect, refs: list[EvidenceRef]) -> list[str]:
+def validate(response: AgentResponse, body: str, prospect: Prospect, refs: list[EvidenceRef], profile) -> list[str]:
     """All rules. Every failure is collected so the operator sees each one
     (FR-314) — no short-circuiting."""
     return (
         validate_citations(response, prospect, refs)
         + validate_channel_claims(response, prospect)
-        + validate_retained(response.subject, body, prospect)
+        + validate_retained(response.subject, body, prospect, profile)
     )
 
 
 # --- Entry point ------------------------------------------------------------
 
 
-def draft_email(prospect: Prospect, settings: Settings, instructions=None) -> Draft:
+def draft_email(prospect: Prospect, settings: Settings, instructions=None, profile=None) -> Draft:
     """Agent path with automatic fallback. NEVER raises (G1).
 
     Returns an agent-sourced Draft when the model produced validated, cited
@@ -418,8 +415,8 @@ def draft_email(prospect: Prospect, settings: Settings, instructions=None) -> Dr
     else:
         try:
             response = request_draft(prospect, settings, instructions, refs)
-            body = assemble_body(prospect, response)
-            errors = validate(response, body, prospect, refs)
+            body = assemble_body(prospect, response, profile)
+            errors = validate(response, body, prospect, refs, profile)
             if not errors:
                 return Draft(
                     subject=response.subject,
@@ -442,7 +439,7 @@ def draft_email(prospect: Prospect, settings: Settings, instructions=None) -> Dr
     # unvalidated Draft rather than raising keeps `draft_email` to one contract
     # (G1) — the pipeline already flags unvalidated drafts for review.
     try:
-        fallback = build_email_draft(prospect, settings)
+        fallback = build_email_draft(prospect, settings, profile)
     except DraftError as exc:
         return Draft(
             subject=None,

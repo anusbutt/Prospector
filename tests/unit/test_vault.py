@@ -110,7 +110,9 @@ class TestRenderNote:
             # without a draft, so no path produced this note's copy.
             "draft_source:",
             "outcome:",
-            "tags: [outreach, duct-cleaning, prospector]",
+            # 008: tags come from the selected profile; render_note falls back to
+            # a vertical-neutral default when called without one.
+            "tags: [outreach, prospector]",
         ]
         assert lines[1:16] == expected_prefixes
         assert lines[16] == "---"

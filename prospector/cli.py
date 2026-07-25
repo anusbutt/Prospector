@@ -94,6 +94,7 @@ def run(
             no_llm=no_llm,
             verbose=verbose,
             instructions=instructions,
+            profile=selected,
         )
     except (ConfigError, IngestError) as exc:
         typer.echo(f"error: {exc}", err=True)

@@ -5,7 +5,11 @@ import pytest
 from prospector.config import ConfigError
 from pathlib import Path
 
-DUCT_PROFILE = Path("profiles/duct-cleaning")
+import prospector
+
+# The reference profile ships inside the package (008), so locate it from the
+# package itself rather than from the working directory.
+DUCT_PROFILE = Path(prospector.__file__).parent / "profiles" / "duct-cleaning"
 
 from prospector.instructions import (
     MAX_INSTRUCTION_CHARS,

@@ -4,4 +4,4 @@ Constitutional guarantees: no sending, no Facebook access, no web UI,
 no fabricated names, no unbacked channel claims.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

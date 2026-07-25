@@ -21,65 +21,10 @@ GENERIC_INBOX_PREFIXES = {
     "team", "service", "bookings", "mail", "inquiries", "enquiries",
 }
 
-# Founder-led, compact sign-off (PRODUCT.md §8, rev. 2 2026-07-17). The
-# LinkedIn company link is deliberately omitted: it may only appear "when
-# appropriate" and must never be forced into every email — a mechanical
-# template cannot judge that, so the locked prose leaves it out (005 FR-204).
-SIGNATURE = "Anas\nFounder, Omniveer"
-
-# Link strategy (PRODUCT.md §8, 005 FR-202..205): exactly ONE promotional link
-# per body — the product page (it hosts the explanation and the demo, so no
-# separate video link and no attachment). Homepage is for Omniveer-broad
-# messages only and never combined with the product link. No booking link
-# unless one is explicitly configured later.
-PRODUCT_URL = "https://www.omniveer.com/duct-lead-qualifier"
-COMPANY_URL = "https://www.omniveer.com"
-LINKEDIN_COMPANY_URL = "https://www.linkedin.com/company/omniveer/"
-
-SUBJECT_TEMPLATE = "Free 10-day pilot for {subject_company}"
-
-# Offer (PRODUCT.md §8, rev. 2 2026-07-17, operator-supplied copy): the
-# Omniveer Duct Lead Qualifier, free 10-day pilot for 5 duct-cleaning
-# companies. The copy is CHANNEL-NEUTRAL — it makes no claim about the
-# prospect's channels (or Facebook at all), so it asserts nothing that would
-# need evidence to support (Constitution v7.0.0, Principle IV).
-# Ends with the single promotional link (the product page carries the demo)
-# and a low-pressure close — no urgency, no guarantees. "Book a demo through
-# the page" refers to the page already linked: no second URL.
-EMAIL_OFFER_PARAGRAPH = (
-    "I'm giving 5 duct-cleaning companies a free 10-day pilot of the "
-    "Omniveer Duct Lead Qualifier."
-)
-
-EMAIL_TEMPLATE = (
-    """Hi {greeting},
-
-"""
-    + EMAIL_OFFER_PARAGRAPH
-    + """
-
-It responds to new leads, qualifies them, books appointments when they're ready, sends the full details to your email, and keeps every lead organized in a dashboard.
-
-You can see the short demo here:
-"""
-    + PRODUCT_URL
-    + """
-
-Reply to this email if you'd like one of the five pilot spots, or book a demo through the page.
-
-{signature}"""
-)
-
-# Invariant template prose that must survive assembly byte-for-byte (FR-015)
-EMAIL_INVARIANTS = (
-    EMAIL_OFFER_PARAGRAPH,
-    "It responds to new leads, qualifies them, books appointments when they're ready, sends the full details to your email, and keeps every lead organized in a dashboard.",
-    "You can see the short demo here:\n" + PRODUCT_URL,
-    "Reply to this email if you'd like one of the five pilot spots, or book a demo through the page.",
-)
-
-# Ad-running is never observable and never claimed (Constitution IV, v7.0.0)
-AD_CLAIM_SUBSTRINGS = ("your ads", "ad campaign", "running ads", "advertis", "your facebook ads", "ad spend")
+# The offer — signature, promotional link, locked fallback copy, invariants and
+# banned-claim vocabulary — is per-vertical CONTENT supplied by the selected
+# profile (008, Constitution v7.0.0 Principle VI). Nothing about a specific
+# offer is hardcoded here; this module only knows how to assemble and validate.
 
 SYSTEM_PROMPT = """You fill two slots for a locked outreach email template. Reply with a JSON object only:
 {"greeting_name": ..., "subject_company": ...}
@@ -170,45 +115,45 @@ def request_slots(prospect: Prospect, settings: Settings) -> dict:
     return slots
 
 
-def assemble_email(prospect: Prospect, slots: dict) -> Draft:
-    """Deterministic assembly from template constants + validated slot fills.
+def assemble_email(prospect: Prospect, slots: dict, profile) -> Draft:
+    """Deterministic assembly from the profile's locked copy + validated slots.
 
-    Rev. 2 (2026-07-17): one channel-neutral template — the copy makes no
-    claims about the prospect's channels, so nothing in it requires evidence
-    (Constitution v7.0.0, Principle IV)."""
+    The template is channel-neutral: it makes no claim about the prospect, so
+    nothing in it requires evidence (Constitution v7.0.0, Principle IV). Only
+    bracketed slots are filled — the prose is never paraphrased."""
     greeting = str(slots.get("greeting_name", "")).strip()
     subject_company = str(slots.get("subject_company", "")).strip() or prospect.company.company
 
-    body = EMAIL_TEMPLATE.format(greeting=greeting, signature=SIGNATURE)
-    subject = SUBJECT_TEMPLATE.format(subject_company=subject_company)
-    errors = validate_email_draft(subject, body, prospect, slots)
+    body = profile.fallback_template.format(greeting=greeting, signature=profile.signature)
+    subject = profile.fallback_subject.format(subject_company=subject_company)
+    errors = validate_email_draft(subject, body, prospect, slots, profile)
     return Draft(subject=subject, body=body, model="", validated=not errors, validation_errors=errors)
 
 
-def validate_email_draft(subject: str, body: str, prospect: Prospect, slots: dict) -> list[str]:
+def validate_email_draft(subject: str, body: str, prospect: Prospect, slots: dict, profile) -> list[str]:
     errors: list[str] = []
     lowered = body.lower()
 
     if re.search(r"\[[^\]\n]{1,60}\]", body) or re.search(r"\[[^\]\n]{1,60}\]", subject):
         errors.append("unfilled [slot] remains")
 
-    for line in EMAIL_INVARIANTS:
+    for line in profile.fallback_invariants:
         if line not in body:
             errors.append(f"template prose altered: missing {line[:40]!r}...")
 
-    for banned in AD_CLAIM_SUBSTRINGS:
+    for banned in profile.banned_claims:
         if banned in lowered or banned in subject.lower():
             errors.append(f"ad-running claim detected: {banned!r}")
 
     # Link strategy (005 FR-202..205): exactly one promotional link — the
     # product page (demo lives there). This structurally blocks a homepage+
     # product combo, second/video/booking links, and any link a slot smuggles in.
-    if body.count("http") != 1 or PRODUCT_URL not in body:
+    if body.count("http") != 1 or profile.product_url not in body:
         errors.append("body must carry exactly one promotional link (the product page)")
     if "linkedin.com" in lowered:
         errors.append("LinkedIn link may not appear in the pitch")
 
-    if not body.rstrip().endswith(SIGNATURE):
+    if not body.rstrip().endswith(profile.signature):
         errors.append("signature altered or missing")
 
     # Constitution Principle V: the rev.-2 template is channel-neutral — no
@@ -243,8 +188,8 @@ def validate_email_draft(subject: str, body: str, prospect: Prospect, slots: dic
     return errors
 
 
-def build_email_draft(prospect: Prospect, settings: Settings) -> Draft:
+def build_email_draft(prospect: Prospect, settings: Settings, profile) -> Draft:
     slots = request_slots(prospect, settings)
-    draft = assemble_email(prospect, slots)
+    draft = assemble_email(prospect, slots, profile)
     draft.model = settings.openrouter_model
     return draft

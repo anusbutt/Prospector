@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prospector"
-version = "0.1.0"
-description = "Researches home-service companies on the open web and drafts personalized, evidence-cited outreach into an Obsidian vault, then delivers only what a human approves. Never contacts Facebook."
+version = "0.2.0"
+description = "Researches local-service companies on the open web and drafts personalized, evidence-cited outreach into an Obsidian vault, then delivers by email only what a human approves. The offer is a swappable per-vertical profile. Never contacts Facebook."
 license = {file = "LICENSE"}
 requires-python = ">=3.11"
 dependencies = [
@@ -32,7 +32,14 @@ prospector = "prospector.cli:app"
 include = ["prospector*"]
 
 [tool.setuptools.package-data]
-prospector = ["data/*.txt", "agent/*.md", "agent/skills/*.md"]
+prospector = [
+    "data/*.txt",
+    # The bundled reference profile (008). Shipped so an installed copy has a
+    # working profile and the packaged tier of the profile search path resolves.
+    "profiles/*/*.md",
+    "profiles/*/*.toml",
+    "profiles/*/skills/*.md",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -31,7 +31,7 @@ FRONTMATTER_KEYS = (
     "tags",
 )
 
-TAGS_LINE = "[outreach, duct-cleaning, prospector]"
+# 008: note tags are per-vertical content supplied by the selected profile.
 MAX_SLUG_LENGTH = 80
 
 
@@ -98,6 +98,7 @@ def render_note(
     log_markdown: str = "-",
     draft: Draft | None = None,
     citations_markdown: str = "",
+    tags_line: str = "[outreach, prospector]",
 ) -> str:
     company = prospect.company
     values = {
@@ -122,7 +123,7 @@ def render_note(
     lines = ["---"]
     for key in FRONTMATTER_KEYS:
         if key == "tags":
-            lines.append(f"tags: {TAGS_LINE}")
+            lines.append(f"tags: {tags_line}")
         else:
             rendered = _yaml_value(values[key])
             lines.append(f"{key}: {rendered}".rstrip())

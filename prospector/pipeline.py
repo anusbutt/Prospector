@@ -48,10 +48,12 @@ def run_batch(
     verbose: bool = False,
     fetcher: Fetcher | None = None,
     instructions=None,
+    profile=None,
 ) -> RunSummary:
     """Process a batch. Raises IngestError only for pre-flight problems.
 
-    `instructions` is the pre-flighted InstructionSet for agent drafting; when
+    `profile` is the pre-flighted offer profile (008) — it supplies the copy
+    constants and note tags. `instructions` is its InstructionSet; when
     None the drafting path falls back to the locked template (FR-315)."""
     vault_dir = Path(vault_dir) if vault_dir else settings.vault_dir
     fetcher = fetcher or Fetcher()
@@ -83,8 +85,9 @@ def run_batch(
                 verbose=verbose,
                 frozen=frozen,
                 instructions=instructions,
+                profile=profile,
             )
-            outcome, detail = _write(prospect, draft, vault_dir, no_llm=no_llm, frozen=frozen)
+            outcome, detail = _write(prospect, draft, vault_dir, no_llm=no_llm, frozen=frozen, profile=profile)
             _count_drafting_path(summary, company.slug, draft)
             if prospect.research.email_evidence is not None:
                 summary.email_recovered += 1
@@ -103,7 +106,7 @@ def run_batch(
             prospect = Prospect(company=company, research=ResearchResult(website=company.website))
             prospect.needs_review = True
             prospect.research.failures.append(f"processing failed: {exc}")
-            _write(prospect, None, vault_dir, no_llm=no_llm, frozen=frozen)
+            _write(prospect, None, vault_dir, no_llm=no_llm, frozen=frozen, profile=profile)
             summary.failed += 1
             outcome, detail = "failed", str(exc)
         _count(summary, prospect)
@@ -121,6 +124,7 @@ def _process_company(
     verbose: bool,
     frozen: bool = False,
     instructions=None,
+    profile=None,
 ) -> tuple[Prospect, Draft | None]:
     research = _research(company, settings, fetcher, verbose=verbose)
     if not company.email:
@@ -135,7 +139,7 @@ def _process_company(
         return prospect, draft
     # 006: agent path with automatic template fallback. Never raises, so the
     # batch cannot be aborted by a drafting failure (FR-318).
-    draft = agent_draft.draft_email(prospect, settings, instructions)
+    draft = agent_draft.draft_email(prospect, settings, instructions, profile)
     if draft.validation_errors:
         research.failures.extend(draft.validation_errors)
     if draft is not None and not draft.validated:
@@ -229,7 +233,8 @@ def _score(company: Company, research: ResearchResult, settings: Settings) -> Pr
 
 
 def _write(
-    prospect: Prospect, draft: Draft | None, vault_dir: Path, *, no_llm: bool, frozen: bool = False
+    prospect: Prospect, draft: Draft | None, vault_dir: Path, *, no_llm: bool,
+    frozen: bool = False, profile=None,
 ) -> tuple[str, str]:
     draft_md = vault.draft_markdown_for(draft, prospect, no_llm=no_llm)
     research_md = vault.build_research_markdown(prospect)
@@ -238,9 +243,10 @@ def _write(
     citations_md = vault.build_citations_markdown(
         draft, agent_draft.build_evidence_refs(prospect.research)
     )
-    note = vault.render_note(
-        prospect, draft_md, research_md, draft=draft, citations_markdown=citations_md
-    )
+    render_kwargs = {"draft": draft, "citations_markdown": citations_md}
+    if profile is not None:
+        render_kwargs["tags_line"] = profile.tags_line
+    note = vault.render_note(prospect, draft_md, research_md, **render_kwargs)
     result = vault.upsert_note(vault_dir, prospect.company.slug, note, freeze_draft=frozen)
     if frozen:
         detail = f"draft frozen (approved/sent), research refreshed, note {result}"

@@ -26,7 +26,6 @@ from prospector.agent_draft import (
     validate_retained,
 )
 from prospector.config import Settings
-from prospector.draft import PRODUCT_URL, SIGNATURE
 from prospector.instructions import InstructionSet
 from prospector.models import (
     AgentResponse,
@@ -38,6 +37,17 @@ from prospector.models import (
     Prospect,
     ResearchResult,
 )
+
+# 008: the offer moved into the profile. Load the shipped reference profile so
+# these tests assert against the copy that actually ships, not a second copy
+# that could drift. It resolves through the packaged tier of the search path, so
+# no environment setup is needed here.
+from prospector.profiles import load as _load_profile
+
+PROFILE = _load_profile("duct-cleaning")
+PRODUCT_URL = PROFILE.product_url
+SIGNATURE = PROFILE.signature
+
 
 OPENROUTER = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -226,7 +236,7 @@ class TestRequestAndParse:
 
 class TestAssembly:
     def test_assembly_golden(self):
-        body = assemble_body(make_prospect(name_used="Scott"), good_response())
+        body = assemble_body(make_prospect(name_used="Scott"), good_response(), PROFILE)
         assert body == (
             "Hi Scott,\n\n"
             "Twenty-two years around Dallas is a long time.\n\n"
@@ -237,7 +247,7 @@ class TestAssembly:
         )
 
     def test_greeting_and_signature_come_from_code(self):
-        body = assemble_body(make_prospect(), good_response())
+        body = assemble_body(make_prospect(), good_response(), PROFILE)
         assert body.startswith("Hi Acme Duct Cleaning team,")
         assert body.rstrip().endswith(SIGNATURE)
 
@@ -335,75 +345,75 @@ class TestCitationRules:
 
 class TestRetainedRules:
     def body_for(self, prospect, response=None):
-        return assemble_body(prospect, response or good_response())
+        return assemble_body(prospect, response or good_response(), PROFILE)
 
     def test_retained_valid_body_passes(self):
         p = make_prospect()
-        assert validate_retained("Free 10-day pilot for Acme Duct", self.body_for(p), p) == []
+        assert validate_retained("Free 10-day pilot for Acme Duct", self.body_for(p), p, PROFILE) == []
 
     def test_retained_rejects_ad_claim(self):
         p = make_prospect()
         response = good_response()
         response.blocks[0].text = "Your ads are bringing in leads you cannot answer."
-        errors = validate_retained("Acme Duct", self.body_for(p, response), p)
+        errors = validate_retained("Acme Duct", self.body_for(p, response), p, PROFILE)
         assert any("ad-running claim" in e for e in errors)
 
     def test_retained_rejects_second_link(self):
         p = make_prospect()
         response = good_response()
         response.blocks[3].text = "Book here: https://cal.com/anas"
-        errors = validate_retained("Acme Duct", self.body_for(p, response), p)
+        errors = validate_retained("Acme Duct", self.body_for(p, response), p, PROFILE)
         assert any("exactly one promotional link" in e for e in errors)
 
     def test_retained_rejects_zero_links(self):
         p = make_prospect()
         response = good_response()
         response.blocks[2].text = "It books the job for you."
-        errors = validate_retained("Acme Duct", self.body_for(p, response), p)
+        errors = validate_retained("Acme Duct", self.body_for(p, response), p, PROFILE)
         assert any("exactly one promotional link" in e for e in errors)
 
     def test_retained_rejects_linkedin(self):
         p = make_prospect()
         response = good_response()
         response.blocks[3].text = "More: https://www.linkedin.com/company/omniveer/"
-        errors = validate_retained("Acme Duct", self.body_for(p, response), p)
+        errors = validate_retained("Acme Duct", self.body_for(p, response), p, PROFILE)
         assert any("LinkedIn" in e for e in errors)
 
     def test_retained_rejects_unfilled_slot(self):
         p = make_prospect()
         response = good_response()
         response.blocks[0].text = "Hello [Company Name], quick note."
-        errors = validate_retained("Acme Duct", self.body_for(p, response), p)
+        errors = validate_retained("Acme Duct", self.body_for(p, response), p, PROFILE)
         assert any("[slot]" in e for e in errors)
 
     def test_retained_rejects_missing_signature(self):
         p = make_prospect()
         body = self.body_for(p).replace(SIGNATURE, "Cheers, Anas")
-        assert any("signature" in e for e in validate_retained("Acme Duct", body, p))
+        assert any("signature" in e for e in validate_retained("Acme Duct", body, p, PROFILE))
 
     def test_retained_rejects_wrong_greeting(self):
         p = make_prospect()
         body = self.body_for(p).replace("Hi Acme Duct Cleaning team,", "Hi Bob,")
-        assert any("greeting must be" in e for e in validate_retained("Acme Duct", body, p))
+        assert any("greeting must be" in e for e in validate_retained("Acme Duct", body, p, PROFILE))
 
     def test_retained_rejects_subject_naming_a_different_company(self):
         """Revised rule (2026-07-20): originality is fine, invention is not."""
         p = make_prospect()
-        errors = validate_retained("Quote for Zerorez Industries", self.body_for(p), p)
+        errors = validate_retained("Quote for Zerorez Industries", self.body_for(p), p, PROFILE)
         assert any("shares no word with the company name" in e for e in errors)
 
     def test_retained_allows_offer_vocabulary_in_subject(self):
         p = make_prospect()
-        assert validate_retained("Free 10-day pilot for Acme Duct", self.body_for(p), p) == []
+        assert validate_retained("Free 10-day pilot for Acme Duct", self.body_for(p), p, PROFILE) == []
 
     def test_retained_name_must_trace_to_evidence(self):
         p = make_prospect(name_used="Marcus")  # not in any evidence record
-        errors = validate_retained("Acme Duct", self.body_for(p), p)
+        errors = validate_retained("Acme Duct", self.body_for(p), p, PROFILE)
         assert any("does not trace" in e for e in errors)
 
     def test_retained_accepts_sourced_name(self):
         p = make_prospect(name_used="Scott")  # matches about_page_1 evidence
-        assert not any("does not trace" in e for e in validate_retained("Acme Duct", self.body_for(p), p))
+        assert not any("does not trace" in e for e in validate_retained("Acme Duct", self.body_for(p), p, PROFILE))
 
 
 # --- V13 possessive-channel guard (added after the first live run) ----------
@@ -484,8 +494,8 @@ class TestChannelClaims:
         )
         from prospector.agent_draft import validate
 
-        body = assemble_body(p, response)
-        errors = validate(response, body, p, self.refs(p))
+        body = assemble_body(p, response, PROFILE)
+        errors = validate(response, body, p, self.refs(p), PROFILE)
         assert any("claims the prospect's own channel" in e for e in errors)
 
 
@@ -494,7 +504,7 @@ class TestChannelClaims:
 
 class TestSubjectRule:
     def body_for(self, prospect):
-        return assemble_body(prospect, good_response())
+        return assemble_body(prospect, good_response(), PROFILE)
 
     @pytest.mark.parametrize(
         "subject",
@@ -507,21 +517,21 @@ class TestSubjectRule:
     )
     def test_creative_subjects_are_allowed(self, subject):
         p = make_prospect()
-        errors = validate_retained(subject, self.body_for(p), p)
+        errors = validate_retained(subject, self.body_for(p), p, PROFILE)
         assert errors == [], f"{subject!r} -> {errors}"
 
     def test_subject_sharing_no_company_word_is_rejected(self):
         p = make_prospect()
-        errors = validate_retained("A quick question about your business", self.body_for(p), p)
+        errors = validate_retained("A quick question about your business", self.body_for(p), p, PROFILE)
         assert any("shares no word with the company name" in e for e in errors)
 
     def test_empty_subject_rejected(self):
         p = make_prospect()
-        assert any("empty" in e for e in validate_retained("   ", self.body_for(p), p))
+        assert any("empty" in e for e in validate_retained("   ", self.body_for(p), p, PROFILE))
 
     def test_overlong_subject_rejected(self):
         p = make_prospect()
-        errors = validate_retained("Acme Duct " + "x" * 100, self.body_for(p), p)
+        errors = validate_retained("Acme Duct " + "x" * 100, self.body_for(p), p, PROFILE)
         assert any("max 90" in e for e in errors)
 
     def test_curly_apostrophe_company_matches_straight_subject(self):
@@ -529,8 +539,8 @@ class TestSubjectRule:
         p = make_prospect()
         p.company.company = "Drew’s dryer vent cleaning"
         p.name_used = "team"
-        body = assemble_body(p, good_response())
-        errors = validate_retained("Drew's inbox that answers itself", body, p)
+        body = assemble_body(p, good_response(), PROFILE)
+        errors = validate_retained("Drew's inbox that answers itself", body, p, PROFILE)
         assert not any("shares no word" in e for e in errors)
 
 

@@ -7,6 +7,8 @@ fallback is the honesty floor Principle IV falls back to and may never be
 silently absent.
 """
 
+from pathlib import Path
+
 import pytest
 
 from prospector.config import ConfigError
@@ -19,7 +21,10 @@ keywords = ["hvac repair", "furnace"]
 banned_claims = ["running ads", "your ads"]
 """
 
-FALLBACK = """## Template
+FALLBACK = """## Subject
+A subject for {subject_company}
+
+## Template
 Hi {greeting_name},
 
 A locked sentence that must survive.
@@ -70,11 +75,32 @@ class TestResolutionOrder:
         monkeypatch.chdir(tmp_path)
         assert any("prospector" in str(p) for p in search_paths())
 
-    def test_bundled_duct_cleaning_profile_loads(self, monkeypatch):
-        """The reference profile must keep working (FR-016)."""
+    def test_profiles_module_is_not_shadowed_by_the_profiles_data_dir(self):
+        """`prospector/profiles.py` and `prospector/profiles/` coexist.
+
+        The data directory has no `__init__.py`, so the module wins over it as a
+        namespace package. Adding one would silently break every import of this
+        module in an installed (non-editable) copy, which is the kind of failure
+        that never shows up in a source checkout."""
+        import prospector.profiles as module
+
+        assert Path(module.__file__).name == "profiles.py"
+        assert not (Path(module.__file__).parent / "profiles" / "__init__.py").exists()
+
+    def test_bundled_duct_cleaning_profile_loads(self, tmp_path, monkeypatch):
+        """The reference profile must keep working (FR-016), from anywhere.
+
+        It ships inside the package, so it resolves with no env var and no
+        ./profiles/ in the working directory — which is what makes an installed
+        copy usable out of the box."""
+        import prospector
+
         monkeypatch.delenv("PROSPECTOR_PROFILES", raising=False)
+        monkeypatch.chdir(tmp_path)
         assert "duct-cleaning" in discover()
-        assert load("duct-cleaning").product_url.startswith("http")
+        profile = load("duct-cleaning")
+        assert profile.product_url.startswith("http")
+        assert profile.root.parent == Path(prospector.__file__).parent / "profiles"
 
 
 class TestDiscovery:
