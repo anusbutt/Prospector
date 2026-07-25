@@ -12,7 +12,7 @@ labels: bug
 ## Command you ran
 
 ```bash
-# e.g. prospector run companies.csv --limit 3
+# e.g. prospector run companies.csv --profile duct-cleaning --limit 3
 ```
 
 ## Expected vs actual

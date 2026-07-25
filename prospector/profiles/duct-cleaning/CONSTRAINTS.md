@@ -41,8 +41,8 @@ program owns. If you write a name yourself, the draft is rejected.
 `cites` is a list of identifiers, and **it must never be empty**.
 
 You are given an evidence catalogue for this company. Each entry has an `id`
-like `about_page_1`, `hook_source_1`, or `fb_link_1`. Those ids are what you
-cite.
+like `about_page_1`, `hook_source_1`, or `email_published_1`. Those ids are what
+you cite. Cite only ids that appear in the catalogue you were given.
 
 - **A block that says something about the prospect** cites the evidence
   id(s) that support it. If you write "you have been serving Dallas for 22
@@ -85,18 +85,23 @@ The word "your" is what turns one into the other:
 | "when someone messages **your page** at 9pm" | "when someone messages a business at 9pm" |
 | "It watches **your inbox**" | "It watches the page inbox" |
 
-Banned outright unless the evidence catalogue contains an `fb_*` record, you
-cite it in that same block, **and** you were told the signal is strong:
+**Banned outright — there is no evidence that makes these acceptable:**
 "your facebook page", "your fb page", "your page", "your inbox",
 "your messenger", "your dms", "your direct messages", "messages your page".
+
+There used to be an exception here for a cited `fb_*` evidence record on a
+strong channel signal. **That exception is gone.** The tool no longer researches,
+scores, or records anything about a prospect's Facebook usage — there is no
+`fb_*` record to cite and no signal to be told about — so a possessive channel
+phrase can never be justified. A validator rejects these unconditionally.
 
 A page appearing in search results is not proof they read it. Say what the tool
 does. Never say what they own.
 
-- **Never assert they use Facebook** unless you were given `fb_*` evidence and
-  you cite it. Describing what the *product* does with a Facebook inbox is a
-  fact about the product and is always fine. Saying *they* are active on
-  Facebook requires evidence.
+- **Never assert they use Facebook.** Not conditionally, not with a hedge.
+  Describing what the *product* does with a Facebook inbox is a fact about the
+  product and is always fine. Saying *they* are on Facebook is a claim about the
+  prospect, and nothing in the evidence catalogue can support it.
 - Never invent a problem, a metric, a compliment, or a number.
 - Never guarantee bookings, revenue, or replies.
 

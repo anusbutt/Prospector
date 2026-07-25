@@ -17,6 +17,14 @@ send_ledger.jsonl
 Vault/
 samples/
 
+# Prospect data must never be committed: these files hold real businesses'
+# names, addresses and websites. `candidates.csv` is the default --out of
+# `prospector source`, so it appears in the working tree on a normal run.
+candidates.csv
+*candidates*.csv
+dm_ledger.jsonl
+*.local.csv
+
 # Internal development method — not part of the public project.
 # These stay on the maintainer's machine and are intentionally untracked.
 .specify/

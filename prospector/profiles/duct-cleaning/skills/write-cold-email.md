@@ -30,8 +30,10 @@ before you write anything. Different evidence supports different openings:
   and repeat customers, and a dropped message costs more.
 - A service area or city supports an opening about their market.
 - An about/team page naming the owner supports addressing what they built.
-- A Facebook page link supports mentioning that channel, but only as a fact
-  about where messages arrive, never as a claim about how active they are.
+
+Nothing in the catalogue describes the prospect's own marketing channels, so no
+opening can be built on one. Do not reach for Facebook, Messenger, ads, or "where
+your leads come from" — you have not been told, and guessing is a fabrication.
 
 **Never open with:**
 - "I hope this email finds you well."

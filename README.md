@@ -183,6 +183,7 @@ Secrets are loaded from the gitignored `.env` file.
 | `OPENROUTER_MODEL` | No | Defaults to `anthropic/claude-sonnet-4.5`. |
 | `PROSPECTOR_PROFILE` | No | Default profile name, so `--profile` can be omitted. |
 | `PROSPECTOR_PROFILES` | No | Extra profile directory, searched before `./profiles/`. |
+| `PROSPECTOR_VAULT` | No | Vault output folder; defaults to `Vault/Outreach`. `--vault` overrides it. |
 | `GOOGLE_PLACES_API_KEY` | For `source` | Required for discovery. During `run`, its absence enables the DuckDuckGo fallback. |
 | `HUNTER_API_KEY` | No | Enables email-name enrichment at medium confidence. |
 | `PROSPECTOR_SEND_PROVIDER` | No | `gmail` (default) or `smtp`. |
@@ -197,6 +198,8 @@ Secrets are loaded from the gitignored `.env` file.
 | `PROSPECTOR_SEND_CAPS` | No | Weekly cap ramp; defaults to `15,30,60,100`. |
 | `PROSPECTOR_SEND_DELAY` | No | Delay range in seconds; defaults to `30,90`. |
 | `PROSPECTOR_LEDGER` | No | Ledger path; defaults to `send_ledger.jsonl`. |
+| `PROSPECTOR_GMAIL_CLIENT` | No | Gmail OAuth client secret; defaults to `secrets/gmail_client_secret.json`. |
+| `PROSPECTOR_GMAIL_TOKEN` | No | Stored Gmail token; defaults to `secrets/gmail_token.json`. |
 
 Gmail OAuth files live under `secrets/`; the send ledger remains local. Both
 locations are excluded from version control.
