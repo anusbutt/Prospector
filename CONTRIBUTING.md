@@ -132,6 +132,11 @@ fixes should include a test that fails before the fix and passes after.
   frameworks or agent/orchestration machinery.
 - Never hardcode secrets. Credentials come from the gitignored `.env`; never log
   or commit them.
+- **Never commit prospect data.** Real company names, addresses, websites and
+  scraped emails belong to third parties and must stay local. The vault,
+  `candidates.csv` (the default `--out` of `prospector source`), the send ledger
+  and `samples/` are all gitignored for this reason. Use fictional data in tests,
+  fixtures, issues and PR output.
 
 ## Commit and PR conventions
 
