@@ -2,12 +2,13 @@
 
 ## Reporting a vulnerability
 
-Please **do not** open a public issue for security vulnerabilities.
+This is a personal project built in public, and issues are closed — but security
+reports are welcome and are the one channel that stays open.
 
-Instead, report them privately through GitHub's
+Report privately through GitHub's
 [private vulnerability reporting](https://github.com/anusbutt/Prospector/security/advisories/new)
-(Security tab → "Report a vulnerability"). If that is unavailable, contact the
-maintainer directly via their GitHub profile.
+(Security tab → "Report a vulnerability"). If that is unavailable, contact me
+directly via my GitHub profile.
 
 Please include:
 
@@ -15,9 +16,10 @@ Please include:
 - Steps to reproduce, or a proof of concept.
 - Any suggested remediation, if you have one.
 
-We will acknowledge your report, investigate, and keep you updated on a fix.
-Please give us a reasonable opportunity to address the issue before any public
-disclosure.
+I will acknowledge your report, investigate, and keep you updated. Please allow a
+reasonable opportunity to address the issue before any public disclosure. As a
+solo maintainer I cannot promise a fix window, but I will tell you where things
+stand rather than leave you waiting.
 
 ## Scope and handling of sensitive data
 
