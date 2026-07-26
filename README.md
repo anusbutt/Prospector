@@ -32,6 +32,7 @@ reference.
 - [Output](#output)
 - [Design principles](#design-principles)
 - [Limitations](#limitations)
+- [Project status](#project-status)
 
 ## Capabilities
 
@@ -55,7 +56,8 @@ reference.
 
 These constraints are enforced in code and tests, and are treated as hard
 requirements: a change that breaks one must be rejected. See
-[`CONTRIBUTING.md`](CONTRIBUTING.md) for the rules contributors must preserve.
+[`docs/design-guarantees.md`](docs/design-guarantees.md) for the full set and how
+each one is held.
 
 | Guarantee | Enforcement |
 | --- | --- |
@@ -510,6 +512,24 @@ prospect-specific claims. `draft_source` identifies the drafting path, and
   message quality, and recipient behavior; application caps do not guarantee
   inbox placement.
 
+## Project status
+
+Prospector is a **personal product, built in public**. The source is here to read,
+fork, and learn from — the design notes in
+[`docs/design-guarantees.md`](docs/design-guarantees.md) explain the constraints
+it holds itself to and why.
+
+It is not a community project: issues are closed, pull requests are not being
+accepted, and there is no roadmap, support commitment, or stability promise. The
+offer copy and the bundled profile reflect one real outreach operation rather than
+a general-purpose configuration. If it is useful to you, fork it and make it
+yours.
+
+Security reports are the exception and are genuinely welcome — see
+[SECURITY.md](SECURITY.md).
+
 ## License
 
-Prospector is available under the [MIT License](LICENSE).
+Prospector is available under the [MIT License](LICENSE) — you may use, modify,
+and redistribute it freely, with no warranty and no obligation on my part to
+review, merge, or support anything.
