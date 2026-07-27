@@ -216,6 +216,39 @@ def send(
     _print_send_report(report)
 
 
+# A skipped note used to report as a bare count, which is the least actionable
+# thing the command could say: "skipped: 47" reads like a malfunction when it
+# usually means a guarantee is working. Each skip already carries a reason, so
+# group and show them. The hints translate the internal reason into what it
+# means for the operator's list.
+SKIP_HINTS = {
+    "already in ledger": "already emailed — the ledger prevents a repeat",
+    "duplicate inbox in this run": "shares an inbox with another note in this batch",
+    "not an email-channel note": "note has no email channel (pre-existing note, or address never recovered)",
+    "missing or invalid email address": "no usable recipient on the note",
+    "draft has no subject": "add a **Subject:** line, or re-draft the note",
+    "draft has no body": "the ## Draft section is empty — re-draft the note",
+}
+MAX_LISTED_SLUGS = 6
+
+
+def _print_skips(results) -> None:
+    """Explain every skipped note, grouped by reason (most common first)."""
+    skips = [r for r in results if r.outcome.value.startswith("skipped")]
+    if not skips:
+        return
+    grouped: dict[str, list[str]] = {}
+    for result in skips:
+        grouped.setdefault(result.detail or "unspecified", []).append(result.slug)
+    typer.echo("\n  skipped:")
+    for reason, slugs in sorted(grouped.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        hint = SKIP_HINTS.get(reason)
+        typer.echo(f"    {len(slugs):>3}  {reason}" + (f"  ({hint})" if hint else ""))
+        shown = slugs[:MAX_LISTED_SLUGS]
+        more = len(slugs) - len(shown)
+        typer.echo(f"         {', '.join(shown)}" + (f", and {more} more" if more else ""))
+
+
 def _print_send_report(report) -> None:
     from prospector.models import SendOutcome
 
@@ -237,6 +270,12 @@ def _print_send_report(report) -> None:
         width = max(len(r.slug) for r in rows)
         for r in rows:
             typer.echo(f"  {r.slug.ljust(width)}  {r.outcome.value:12}  {r.detail}")
+    _print_skips(report.results)
+    # A run that selects nothing is the case most likely to be read as a bug.
+    if report.sent == 0 and report.skipped and not report.failed:
+        typer.echo(
+            "\n  Nothing to send: every approved note was skipped for a reason above."
+        )
 
 
 def _print_sourcing_summary(summary) -> None:
