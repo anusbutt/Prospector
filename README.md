@@ -36,6 +36,8 @@ reference.
 
 ## Capabilities
 
+- Discover new companies via Google Places, skipping any already in your vault,
+  and write a stable, diffable candidate CSV.
 - Ingest CSV files and Markdown tables.
 - Deduplicate shared inboxes.
 - Recover a published address from a company's own pages when the input row has
@@ -51,6 +53,8 @@ reference.
 - Preserve human-owned content across repeated runs.
 - Deliver approved drafts through Gmail or authenticated SMTP with dry-run
   defaults, daily caps, pacing, and duplicate-send protection.
+- Explain every skipped company by name and reason, at every stage — nothing is
+  dropped silently.
 
 ## Safety guarantees
 
@@ -65,7 +69,7 @@ each one is held.
 | Email is the only channel | There is no Messenger or Facebook delivery path in the tool, and no command that opens one. |
 | Facebook is never contacted | All outbound HTTP traffic passes through a guard that rejects Facebook and Messenger hosts before network activity. Meta Pixel markup on a company's *own* site is read as a sourcing signal; the URLs inside it are never requested. |
 | Names are never fabricated | Deterministic code extracts and scores names. Only high-confidence, source-backed names are used; the model does not choose the greeting. |
-| No company is silently dropped | A row with no address gets an email-recovery attempt over pages already fetched; if that fails the company is named in the run summary. There is no third outcome. |
+| No company is silently dropped | Every stage explains what it left out. `source` reports companies skipped as already known; `run` attempts email recovery for a row with no address and names any company it still cannot reach; `send` reports each skipped note with its reason. There is no silent third outcome anywhere. |
 | Prospect claims require evidence | Every agent-written prose block cites captured research records. A deterministic validator rejects missing or invalid citations. |
 | Unsupported claims are rejected | Invalid or unverifiable copy is rejected and replaced with the profile's locked template. |
 | A broken profile stops the run | Profiles are validated in full before any company is processed; a malformed one exits 1 having fetched and written nothing. |
@@ -75,18 +79,21 @@ each one is held.
 ## How it works
 
 ```text
+Google Places (optional: prospector source)
+    |
+    v  new companies only — anything already in the vault is dropped
 Company list
     |
     v
-Ingest -> deduplicate -> resolve -> fetch -> extract -> score -> draft
-                                                               |
-                                                               v
-                                                        Obsidian vault
-                                                               |
-                                                     human review/approval
-                                                               |
-                                                               v
-                                                   Gmail API or SMTP
+Ingest -> deduplicate -> resolve -> fetch -> recover email -> extract -> score -> draft
+                                                                                   |
+                                                                                   v
+                                                                            Obsidian vault
+                                                                                   |
+                                                                         human review/approval
+                                                                                   |
+                                                                                   v
+                                                                       Gmail API or SMTP
 ```
 
 The pipeline has three operational stages:
@@ -349,6 +356,27 @@ prospector send --send --yes
 
 `prospector send` is a dry-run unless `--send` is present.
 
+Approved notes that cannot be sent are reported with the reason, grouped and
+named, rather than reduced to a count:
+
+```text
+  to send: 0   deferred (cap): 0   skipped: 47   failed: 0
+
+  skipped:
+     46  already in ledger  (already emailed — the ledger prevents a repeat)
+         a-z-air-duct, ace-duct-cleaning-inc, air-central, and 43 more
+      1  draft has no subject  (add a **Subject:** line, or re-draft the note)
+         monster-vac
+
+  Nothing to send: every approved note was skipped for a reason above.
+```
+
+The common reasons are: the recipient or note is already in the send ledger, the
+note shares an inbox with another in the same batch, the draft is missing a
+subject or body, or the note has no usable email address. A skipped note is
+never a silent failure — and `already in ledger` in particular is the
+duplicate-send guard working, not an error.
+
 ### Exit codes
 
 | Command | Code | Meaning |
@@ -405,7 +433,8 @@ always scores down rather than up.
    values.
 4. Review each draft in the **To send** queue.
 5. Change `status: to-send` to `status: approved` when the message is ready.
-6. Run `prospector send` to preview the batch.
+6. Run `prospector send` to preview the batch. Read the skip list — an approved
+   note is not necessarily a sendable one.
 7. Run `prospector send --send` to deliver it.
 
 Prospector preserves user-edited statuses, `## Log` entries, and custom sections
