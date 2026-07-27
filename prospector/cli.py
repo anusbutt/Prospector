@@ -114,9 +114,15 @@ def source(
     keep_all: bool = typer.Option(False, "--all", help="Keep every discovered candidate (default: only ad_signal: pixel)"),
     max_queries: int = typer.Option(60, "--max-queries", help="Places request budget for this run"),
     limit: int = typer.Option(None, "--limit", help="Stop after N metros (testing)"),
+    vault: Path = typer.Option(None, "--vault", help="Vault to check for already-known companies (default: Vault/Outreach)"),
+    include_known: bool = typer.Option(False, "--include-known", help="Do not drop companies already in the vault"),
     verbose: bool = typer.Option(False, "--verbose", help="Per-step logging to stderr"),
 ):
-    """Discover companies for a keyword across US metros and write a candidate CSV."""
+    """Discover companies for a keyword across US metros and write a candidate CSV.
+
+    Companies already in the vault are dropped before any homepage is fetched,
+    so a repeat sweep returns only what is new. Use --include-known to keep them.
+    """
     from prospector.source import load_metros, run_sourcing  # deferred: keeps --help fast
 
     settings = load_settings()
@@ -138,6 +144,8 @@ def source(
             max_queries=max_queries,
             limit=limit,
             verbose=verbose,
+            vault_dir=vault or settings.vault_dir,
+            include_known=include_known,
         )
     except ConfigError as exc:
         typer.echo(f"error: {exc}", err=True)
@@ -284,10 +292,19 @@ def _print_sourcing_summary(summary) -> None:
     typer.echo(
         f"  discovered: {summary.discovered}   duplicates collapsed: {summary.duplicates_collapsed}"
     )
+    # Never a silent drop: the gate is the reason a repeat sweep looks empty.
+    typer.echo(
+        f"  already in vault (skipped): {summary.already_known}   new companies: {summary.kept_with_all}"
+    )
     typer.echo(
         f"  pixel-positive: {summary.pixel_positive}   emails found: {summary.emails_found}   rows written: {summary.written}"
     )
-    if summary.written == 0 and summary.kept_with_all > 0:
+    if summary.kept_with_all == 0 and summary.already_known:
+        typer.echo(
+            "\n  Nothing new: every company found is already in your vault."
+            "\n  Try another keyword or more metros, or --include-known to list them anyway."
+        )
+    elif summary.written == 0 and summary.kept_with_all > 0:
         typer.echo(f"  note: 0 rows written; --all would have kept {summary.kept_with_all}")
     if summary.failures:
         typer.echo("")

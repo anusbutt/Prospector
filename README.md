@@ -314,6 +314,23 @@ prospector source --out candidates.csv --max-queries 30
 
 Without `--keyword`, the profile's first keyword is used.
 
+**Only new companies come back.** Anything already in your vault is dropped
+before its website is fetched, so a repeat sweep spends Places queries and
+nothing else, and the CSV contains only companies you have not seen. Matching is
+by company slug, with the website domain as a second key to catch a business
+whose listing name has changed. Dropped companies are counted in the summary
+rather than silently discarded:
+
+```text
+  already in vault (skipped): 40   new companies: 7
+```
+
+Use `--include-known` to keep them, and `--vault` to point at a different vault.
+A first run with no vault yet suppresses nothing.
+
+Output rows are sorted by company name, so an unchanged result set produces an
+unchanged file — two candidate CSVs can be diffed meaningfully.
+
 `source` uses Google Places Text Search, deduplicates results, fetches each
 candidate's own website, and checks retrieved markup for Meta Pixel signals
 without contacting Facebook. By default it writes pixel-positive candidates;

@@ -18,6 +18,7 @@ from selectolax.parser import HTMLParser
 
 import httpx
 
+from prospector import vault
 from prospector.config import ConfigError
 from prospector.extract import EMAIL_RE, _plausible_email, extract_public_email
 from prospector.fetch import BlockedHostError, Fetcher, FetchError, is_blocked_host
@@ -57,6 +58,7 @@ class SourcingSummary:
     query_budget: int = 0
     discovered: int = 0
     duplicates_collapsed: int = 0
+    already_known: int = 0  # dropped at the gate: already in the vault
     kept_with_all: int = 0  # unique candidates (what --all would write)
     pixel_positive: int = 0
     emails_found: int = 0
@@ -156,13 +158,26 @@ def candidate_from_place(place: dict, metro: str) -> Candidate | None:
     )
 
 
-def dedupe(candidates: list[Candidate], summary: SourcingSummary) -> list[Candidate]:
+def dedupe(
+    candidates: list[Candidate], summary: SourcingSummary, metros: list[str] | None = None
+) -> list[Candidate]:
     """Collapse duplicates by place_id, then website domain. First seen wins
-    (metro-list order, so bigger metros win ties — research.md R6)."""
+    (metro-list order, so bigger metros win ties — research.md R6).
+
+    "First seen" is made explicit rather than inherited from the order Places
+    happened to answer in: candidates are ranked by metro position, then by
+    place_id, before the pass. Metro precedence is unchanged; what changes is
+    that two runs over the same results now collapse to the same winner even if
+    the API returned them in a different order."""
+    order = {metro: i for i, metro in enumerate(metros or [])}
+    ranked = sorted(
+        candidates,
+        key=lambda c: (order.get(c.metro, len(order)), c.place_id, c.company),
+    )
     unique: list[Candidate] = []
     seen_ids: set[str] = set()
     seen_domains: set[str] = set()
-    for candidate in candidates:
+    for candidate in ranked:
         if candidate.place_id and candidate.place_id in seen_ids:
             summary.duplicates_collapsed += 1
             continue
@@ -175,6 +190,65 @@ def dedupe(candidates: list[Candidate], summary: SourcingSummary) -> list[Candid
             seen_domains.add(candidate.domain)
         unique.append(candidate)
     return unique
+
+
+def known_companies(vault_dir: str | Path | None) -> tuple[set[str], set[str]]:
+    """Slugs and website domains of every company already in the vault.
+
+    Sourcing is for finding companies you do NOT have yet. Anything already in
+    the vault has been researched, drafted, and possibly emailed, so re-finding
+    it costs Places quota and a homepage fetch to produce a row you would throw
+    away. A missing vault is not an error — it just means nothing is known yet.
+
+    Matching is by company slug, with the website domain as a second key. Slug
+    is the only one of the two available before the homepage fetch, which is why
+    the gate can run early; domain catches a business whose Places display name
+    has drifted since it was first sourced."""
+    slugs: set[str] = set()
+    domains: set[str] = set()
+    if vault_dir is None:
+        return slugs, domains
+    vault_dir = Path(vault_dir)
+    if not vault_dir.is_dir():
+        return slugs, domains
+    for path in sorted(vault_dir.glob("*.md")):
+        if path.name.startswith("_"):  # _Dashboard.md and friends
+            continue
+        slugs.add(path.stem)
+        try:
+            frontmatter, _ = vault.parse_note(path.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+        website = (frontmatter.get("website") or "").strip().lower()
+        if not website:
+            continue
+        # Notes store a display form ("acme.com/about"), not a URL.
+        domain = _domain(website if "//" in website else f"https://{website}")
+        if domain:
+            domains.add(domain)
+    return slugs, domains
+
+
+def drop_known(
+    candidates: list[Candidate],
+    known_slugs: set[str],
+    known_domains: set[str],
+    summary: SourcingSummary,
+) -> list[Candidate]:
+    """Keep only companies the vault has never seen (the sourcing gate).
+
+    Runs before any homepage is fetched, so a repeat sweep costs Places queries
+    and nothing else. Dropped companies are counted, never silently discarded."""
+    fresh: list[Candidate] = []
+    for candidate in candidates:
+        if vault.slugify(candidate.company) in known_slugs:
+            summary.already_known += 1
+            continue
+        if candidate.domain and candidate.domain in known_domains:
+            summary.already_known += 1
+            continue
+        fresh.append(candidate)
+    return fresh
 
 
 def _city_state(address: str) -> str | None:
@@ -311,12 +385,23 @@ def capture_email(candidate: Candidate, html: str, fetcher: Fetcher) -> None:
 CSV_HEADER = ["company", "email", "website", "city", "ad_signal"]
 
 
+def _row_sort_key(candidate: Candidate) -> tuple[str, str, str]:
+    """Canonical row order: by company, then domain, then place_id.
+
+    Places can return the same businesses in a different order on different
+    days. Sorting on the candidate's own values means the output file depends on
+    WHAT was found, not on the order it arrived in — so an unchanged result set
+    produces an unchanged file. Company first because the CSV is read by a human
+    before it is fed to `run`."""
+    return (candidate.company.casefold(), candidate.domain or "", candidate.place_id)
+
+
 def write_candidates_csv(candidates: list[Candidate], out: Path) -> int:
     """Write the candidate CSV (header always; zero rows -> header-only file)."""
     with out.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
         writer.writerow(CSV_HEADER)
-        for c in candidates:
+        for c in sorted(candidates, key=_row_sort_key):
             writer.writerow([c.company, c.email or "", c.domain or "", c.city, c.ad_signal])
     return len(candidates)
 
@@ -333,8 +418,10 @@ def run_sourcing(
     verbose: bool = False,
     searcher: PlacesSearcher | None = None,
     fetcher: Fetcher | None = None,
+    vault_dir: str | Path | None = None,
+    include_known: bool = False,
 ) -> SourcingSummary:
-    """Full sourcing pipeline: search -> parse -> dedupe -> classify -> write CSV."""
+    """Full sourcing pipeline: search -> dedupe -> drop known -> classify -> CSV."""
     import sys
 
     log = (lambda msg: print(msg, file=sys.stderr)) if verbose else None
@@ -345,7 +432,18 @@ def run_sourcing(
     candidates = discover(
         searcher, keyword, metros, max_queries=max_queries, limit=limit, summary=summary, log=log
     )
-    unique = dedupe(candidates, summary)
+    unique = dedupe(candidates, summary, metros)
+
+    # The gate sits BEFORE the fetch loop: a company already in the vault costs
+    # a Places result and nothing more. Fetching its homepage again to classify
+    # a row that would be discarded is the expensive mistake this avoids.
+    if not include_known:
+        known_slugs, known_domains = known_companies(vault_dir)
+        before = len(unique)
+        unique = drop_known(unique, known_slugs, known_domains, summary)
+        if log and before != len(unique):
+            log(f"gate: dropped {before - len(unique)} already in the vault")
+
     summary.kept_with_all = len(unique)
 
     for candidate in unique:
