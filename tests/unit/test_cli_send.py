@@ -281,3 +281,95 @@ def test_from_spoofing_fails_preflight(tmp_path, monkeypatch):
     assert result.exit_code == 1
     assert "spoof" in result.output.lower()
     assert PASSWORD not in result.output
+
+
+# --- Skip reporting -----------------------------------------------------------
+# A bare "skipped: 47" is the least actionable thing this command can say: it
+# reads as a malfunction when it usually means the ledger guarantee is working.
+
+
+def test_skipped_notes_report_their_reason(tmp_path, monkeypatch):
+    """Every skip is explained, grouped by reason, with the slugs named."""
+    from prospector import ledger
+    from prospector.models import LedgerRecord
+
+    _env(tmp_path, monkeypatch)
+    vault = tmp_path / "Vault" / "Outreach"
+    _note(vault, "already-mailed", email="dup@acme.com")
+    _note(vault, "no-subject", email="fine@acme.com")
+    (vault / "no-subject.md").write_text(
+        (vault / "no-subject.md").read_text(encoding="utf-8").replace("**Subject:** Hi\n\n", ""),
+        encoding="utf-8",
+    )
+    ledger.append(
+        tmp_path / "ledger.jsonl",
+        LedgerRecord(
+            ts="2026-07-18T01:00:00", slug="already-mailed", recipient="dup@acme.com",
+            company="Already Mailed", message_id="<x@y>", result="sent", error=None,
+            from_account="outreach@omniveer.com",
+        ),
+    )
+
+    result = runner.invoke(app, ["send", "--vault", str(vault)])
+
+    assert result.exit_code == 0
+    assert "skipped:" in result.output
+    # the reason, the count, and the note it applies to
+    assert "already in ledger" in result.output
+    assert "already-mailed" in result.output
+    assert "draft has no subject" in result.output
+    assert "no-subject" in result.output
+    # and a plain-language hint for what it means
+    assert "the ledger prevents a repeat" in result.output
+
+
+def test_all_skipped_run_says_nothing_to_send(tmp_path, monkeypatch):
+    """The zero-selected case is the one most likely to be read as a bug."""
+    _env(tmp_path, monkeypatch)
+    vault = tmp_path / "Vault" / "Outreach"
+    _note(vault, "wrong-channel")
+    (vault / "wrong-channel.md").write_text(
+        (vault / "wrong-channel.md").read_text(encoding="utf-8").replace(
+            "channel: email", "channel: messenger"
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["send", "--vault", str(vault)])
+
+    assert result.exit_code == 0
+    assert "Nothing to send" in result.output
+    assert "not an email-channel note" in result.output
+
+
+def test_long_skip_group_is_truncated_with_a_count(tmp_path, monkeypatch):
+    """A 46-note skip group must not bury the summary under 46 lines."""
+    _env(tmp_path, monkeypatch)
+    vault = tmp_path / "Vault" / "Outreach"
+    for i in range(9):
+        _note(vault, f"note-{i}")
+        (vault / f"note-{i}.md").write_text(
+            (vault / f"note-{i}.md").read_text(encoding="utf-8").replace(
+                "channel: email", "channel: messenger"
+            ),
+            encoding="utf-8",
+        )
+
+    result = runner.invoke(app, ["send", "--vault", str(vault)])
+
+    assert result.exit_code == 0
+    assert "and 3 more" in result.output  # 9 total, 6 listed
+
+
+def test_clean_run_prints_no_skip_block(tmp_path, monkeypatch):
+    _env(tmp_path, monkeypatch)
+    vault = tmp_path / "Vault" / "Outreach"
+    _note(vault, "good-note")
+
+    result = runner.invoke(app, ["send", "--vault", str(vault)])
+
+    assert result.exit_code == 0
+    # the summary line always carries "skipped: 0"; what must be absent is the
+    # explanation block that follows it
+    assert "\n  skipped:\n" not in result.output
+    assert "Nothing to send" not in result.output
