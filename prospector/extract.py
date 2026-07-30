@@ -78,10 +78,17 @@ def discover_extra_pages(homepage_html: str, base_url: str) -> list[tuple[str, s
         href = (node.attributes.get("href") or "").strip()
         if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
             continue
-        absolute = urljoin(base_url.rstrip("/") + "/", href)
-        if urlparse(absolute).hostname != base_host:
+        try:
+            absolute = urljoin(base_url.rstrip("/") + "/", href)
+            if urlparse(absolute).hostname != base_host:
+                continue
+            path = urlparse(absolute).path.lower()
+        except ValueError:
+            # A malformed href is the page author's mistake, not a reason to
+            # lose the company. An unfilled template placeholder such as
+            # "http://[BookingLink]" reads as an IPv6 literal to urlsplit
+            # (3.11.4+), which then raises from ipaddress. Skip the link.
             continue
-        path = urlparse(absolute).path.lower()
         for kind, keywords in PAGE_KEYWORDS.items():
             if kind not in found and any(k in path for k in keywords):
                 found[kind] = absolute
