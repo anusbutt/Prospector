@@ -61,6 +61,10 @@ class ResearchResult:
     # pages rather than supplied in the input row.
     email_evidence: "Evidence | None" = None
     city: str | None = None
+    # How many of the company's own pages were actually read. Distinguishes
+    # "no site to read" from "read the site, nothing published" when explaining
+    # an unreachable company (008 FR-010).
+    pages_fetched: int = 0
     sources_consulted: list[str] = field(default_factory=list)
     failures: list[str] = field(default_factory=list)
 

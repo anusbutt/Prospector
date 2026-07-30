@@ -128,7 +128,7 @@ def _process_company(
 ) -> tuple[Prospect, Draft | None]:
     research = _research(company, settings, fetcher, verbose=verbose)
     if not company.email:
-        raise NoEmailFound(company.bucket_reason or "no email address found")
+        raise NoEmailFound(_no_email_reason(research))
     prospect = _score(company, research, settings)
     draft: Draft | None = None
     if no_llm:
@@ -145,6 +145,21 @@ def _process_company(
     if draft is not None and not draft.validated:
         prospect.needs_review = True
     return prospect, draft
+
+
+def _no_email_reason(research: ResearchResult) -> str:
+    """Why this company is unreachable, judged AFTER recovery ran (008 FR-010).
+
+    The ingest-time reason describes the input row ("blank email"), so reporting
+    it here reads as though recovery never happened. What an operator needs is
+    which stage ran out of road: a keyword returning listings with no websites
+    is a sourcing problem, while sites that publish no address is a vertical
+    that simply prefers contact forms."""
+    if not research.website:
+        return "no website could be resolved"
+    if not research.pages_fetched:
+        return f"no page could be fetched from {research.website}"
+    return "no published address on any fetched page"
 
 
 def _research(company: Company, settings: Settings, fetcher: Fetcher, *, verbose: bool) -> ResearchResult:
@@ -164,6 +179,8 @@ def _research(company: Company, settings: Settings, fetcher: Fetcher, *, verbose
                 html = _fetch_page(url, fetcher, research, check_robots=True)
                 if html is not None:
                     pages.append(extracting.PageContent(kind, url, html))
+
+    research.pages_fetched = len(pages)
 
     # 008 FR-006: no supplied address -> look for one the company publishes on
     # the pages we already fetched. No new request is made (FR-011).
