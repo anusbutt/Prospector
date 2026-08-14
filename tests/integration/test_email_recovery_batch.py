@@ -76,6 +76,12 @@ class TestRecoveryOutcomes:
         summary, _ = run(tmp_path, stubs)
         assert [name for name, _ in summary.skipped_companies] == ["Unreachable Ducts"]
 
+    def test_skip_reason_describes_the_outcome_not_the_input_row(self, tmp_path, stubs):
+        """FR-010: "blank email" restates the CSV. The operator needs to know
+        which stage ran out of road — the site was read and published nothing."""
+        summary, _ = run(tmp_path, stubs)
+        assert summary.skipped_companies[0][1] == "no published address on any fetched page"
+
     def test_recovered_address_lands_in_the_note(self, tmp_path, stubs):
         _, vault_dir = run(tmp_path, stubs)
         text = (vault_dir / "recoverable-ducts.md").read_text(encoding="utf-8")

@@ -25,6 +25,14 @@ class TestDiscoverExtraPages:
         html = '<a href="https://other.com/about">About</a>'
         assert discover_extra_pages(html, "https://acmeduct.com") == []
 
+    def test_malformed_href_does_not_lose_the_page(self):
+        # An unfilled template placeholder reads as an IPv6 literal to urlsplit
+        # and raises from ipaddress. One bad link must not cost the company.
+        html = '<a href="http://[BookingLink]">Book</a><a href="/contact">c</a>'
+        assert discover_extra_pages(html, "https://acmeduct.com") == [
+            ("contact", "https://acmeduct.com/contact")
+        ]
+
     def test_capped_at_three(self):
         html = (
             '<a href="/about">a</a><a href="/team">t</a>'
